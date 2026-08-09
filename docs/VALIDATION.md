@@ -54,6 +54,32 @@ mapping), to confirm the original path still works.
 
 - Result: **success, 36.5 s**, same five result artifacts
 
+## 4b. Threshold fallback defect, fixed
+
+Found while running a packaged build end to end on a small human set (222
+sequences, 77 after the IGH filter).
+
+`calculateDistribution.R` called `return()` at the top level of a `tryCatch()`
+expression, which is not valid R. Every data-quality guard, the ones for fewer
+than 5 unique distances, fewer than 20 valid distances, or near-zero variance,
+therefore raised *"no function to return from"* instead of taking its intended
+quantile-based path. The error handler beneath it returned a constant **0.1**,
+which the pipeline could not distinguish from a real estimate. On the set above
+the intended median threshold is **0.5111**, a fivefold difference, and the
+clone structure changes with it.
+
+Runs that reached the GMM methods were never affected, which includes the mouse
+and human runs recorded above: the spread measured in section 5 (0.0876–0.1041)
+is genuine GMM output, so their thresholds are real estimates that happen to
+round to 0.1.
+
+Affected are only repertoires small or homogeneous enough to trip one of the
+three guards. Such a run cannot be identified retrospectively from its outputs,
+because the constant is indistinguishable from a computed value; re-running is
+the only way to tell. The guards now work as written, and any path with nothing
+usable to report prints `AUTOAB_THRESHOLD_UNAVAILABLE` with a reason, which
+stops the pipeline instead of letting it finish on a placeholder.
+
 ## 5. Reproducibility, known limitation
 
 **Repeat runs on identical input do not produce identical clone counts.** Three

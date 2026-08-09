@@ -63,6 +63,10 @@ mac:
   gatekeeperAssess: false
   entitlements: entitlements.mac.plist
   entitlementsInherit: entitlements.mac.plist
+  # Runs only when notarisation credentials are in the environment, so ordinary
+  # local builds are unaffected. See docs/SIGNING.md.
+  notarize:
+    teamId: UW76474L52
   extendInfo:
     NSAppleEventsUsageDescription: "This app needs access to run analysis scripts."
     # Electron 28 and the bundled CPython are both built with minos 11.0, so

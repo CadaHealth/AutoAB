@@ -73,6 +73,11 @@ def create_germline(db, v, d, j):
 
 
 
+# Emitted by backend/scripts/calculateDistribution.R when it cannot produce a
+# threshold. Keep the two in step.
+R_UNAVAILABLE_MARKER = 'AUTOAB_THRESHOLD_UNAVAILABLE'
+
+
 class ThresholdUnavailable(Exception):
     """The clonal distance threshold could not be computed.
 
@@ -166,6 +171,17 @@ def findDist(dbPath, pathToScript=None, pathToPlot=None):
             print(f"R script stderr: {result.stderr[:500]}")
 
     output_str = result.stdout or ''
+
+    # The script says so explicitly when it has nothing usable, rather than
+    # emitting a placeholder number the pipeline would take at face value.
+    for line in output_str.splitlines():
+        if line.startswith(R_UNAVAILABLE_MARKER):
+            _, _, reason = line.partition('\t')
+            raise ThresholdUnavailable(
+                f"The clonal distance threshold could not be estimated: "
+                f"{reason.strip() or 'no reason given'}.",
+                detail=(result.stderr or '')[-800:],
+            )
 
     # R prints the threshold as the last line; fall back to scanning for a
     # decimal if the script also emitted diagnostics after it.

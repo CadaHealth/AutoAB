@@ -42,6 +42,19 @@ for (let i = 0; i < 40 && !win; i++) {
 }
 if (!win) throw new Error('no application window appeared');
 await win.waitForLoadState('domcontentloaded');
+
+// The Setup screen opens over everything when a dependency is missing, which
+// would swallow every click below. Dismiss it, but report what it said: a run
+// on a machine short of R fails later, and this is the explanation.
+await win.waitForTimeout(1500);
+if (await win.locator('h1:has-text("Setup")').count()) {
+  const missing = await win.locator('li.item:not(.ok) .label').allInnerTexts();
+  if (missing.length) console.log(`  ! setup screen reports missing: ${missing.join(', ')}`);
+  await win.locator('button:has-text("Continue")').last().click();
+  await win.waitForTimeout(500);
+  ok('setup screen dismissed');
+}
+
 await win.waitForSelector('text=Define Study', { timeout: 30000 });
 ok('wizard step 1 rendered');
 

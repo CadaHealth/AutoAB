@@ -1,0 +1,64 @@
+# One-command environment for AutoAB.
+#
+#   conda env create -f backend/environment.yml
+#   conda activate autoab
+#
+# This brings the whole toolchain (Python, R, every R package, Change-O,
+# pRESTO and IgBLAST itself), so nothing else has to be installed by hand and
+# scripts/install.sh is not needed.
+#
+# Apple Silicon: r-alakazam is only published for osx-64, so build the
+# environment as x86-64 and let Rosetta 2 run it:
+#
+#   CONDA_SUBDIR=osx-64 conda env create -f backend/environment.yml
+#   conda activate autoab
+#   conda config --env --set subdir osx-64      # keep later installs consistent
+#
+# (bioconda does publish igblast for osx-arm64, but one mixed-architecture
+# environment is not worth the trouble for the sake of a single package.)
+#
+# The previous revision of this file asked for `bioconductor-alakazam` and
+# `bioconductor-shazam`, neither of which exists on any channel. The correct
+# names are r-alakazam and r-shazam, so `conda env create` could never have
+# succeeded with it.
+
+name: autoab
+
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  # --- Python ---
+  - python=3.11
+  - pip
+  - pandas>=2.0
+  - biopython>=1.81
+  - numpy>=1.24
+  - scipy
+  - matplotlib>=3.7
+
+  # --- AIRR / Immcantation Python tooling ---
+  - airr
+  - changeo>=1.3.0
+  - presto>=0.7.0
+
+  # --- Germline assignment ---
+  - igblast=1.22.0
+
+  # --- R and the packages the analysis scripts load ---
+  - r-base>=4.3
+  - r-ggplot2
+  - r-dplyr
+  - r-tidyr
+  - r-ape
+  - r-alakazam
+  - r-shazam
+  # Tree building writes its output as JSON. Without this, tree construction
+  # fails with "there is no package called 'jsonlite'". That is logged as a
+  # warning, so the run still reports success but produces no trees.
+  - r-jsonlite
+
+  # --- Optional: maximum-likelihood trees. Without it tree building falls
+  #     back to neighbour-joining, which works but is less accurate.
+  - iqtree

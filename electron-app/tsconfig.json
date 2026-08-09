@@ -1,0 +1,29 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": false,
+    "isolatedModules": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "$lib/*": ["./src/renderer/lib/*"],
+      "$components/*": ["./src/renderer/lib/components/*"],
+      "$stores/*": ["./src/renderer/lib/stores/*"],
+      "$styles/*": ["./src/renderer/lib/styles/*"]
+    }
+  },
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.svelte"],
+  "exclude": ["node_modules", "dist"]
+}
+

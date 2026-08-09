@@ -1,0 +1,106 @@
+appId: com.bcr-analysis.app
+productName: Clono
+copyright: Copyright © 2024
+
+directories:
+  output: release
+  buildResources: static
+
+files:
+  - dist/**/*
+  - static/**/*
+  - "!**/*.ts"
+  - "!**/node_modules/**/*.md"
+  - "!**/node_modules/**/*.d.ts"
+
+extraResources:
+  # Backend Python code
+  - from: ../backend
+    to: backend
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+  
+  # IgBLAST binaries
+  - from: ../geneGUI/bin
+    to: bin
+    filter:
+      - "**/*"
+  
+  # Database and reference files
+  - from: ../geneGUI/data
+    to: data
+    filter:
+      - "**/*"
+
+mac:
+  category: public.app-category.healthcare-fitness
+  icon: static/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: entitlements.mac.plist
+  entitlementsInherit: entitlements.mac.plist
+  extendInfo:
+    NSAppleEventsUsageDescription: "This app needs access to run analysis scripts."
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 380
+
+win:
+  icon: static/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  publisherName: BCR Analysis Team
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: true
+  installerIcon: static/icon.ico
+  uninstallerIcon: static/icon.ico
+  license: LICENSE.txt
+
+linux:
+  icon: static/icons
+  category: Science
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  desktop:
+    Name: B-Cell Repertoire Analysis
+    Comment: Analyze B-cell receptor repertoire data
+    Categories: Science;Biology;
+
+appImage:
+  license: LICENSE.txt
+
+publish:
+  provider: github
+  releaseType: release
+

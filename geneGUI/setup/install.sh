@@ -1,0 +1,11 @@
+pip3 install PyQt6
+pip3 install qdarkstyle
+pip3 install tabulate
+pip3 install SeqIO
+pip3 install biopython
+pip3 install pandas
+pip3 install matplotlib
+#pip3 install changeo-x.y.x.tar.gz
+#pip3 install numpy
+#pip3 install scipy
+pip3 install Image

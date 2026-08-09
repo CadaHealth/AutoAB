@@ -1,0 +1,58 @@
+# --- External binaries (fetched by scripts/install.sh) ---
+geneGUI/bin/igblastn
+geneGUI/bin/igblastp
+geneGUI/bin/makeblastdb
+geneGUI/bin/internal_data
+
+# --- Node / Electron ---
+node_modules/
+electron-app/dist/
+electron-app/release/
+electron-app/out/
+electron-app/.vite/
+npm-debug.log*
+.eslintcache
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.Python
+*.egg-info/
+.eggs/
+
+# --- Pipeline outputs ---
+geneGUI/outs/
+outs/
+build-trees-input/
+clean_fasta/
+clean_db_files/
+trees/
+*.fmt7
+*.dSYM/
+
+# Generated BLAST indexes (rebuilt from the checked-in FASTAs on first run)
+geneGUI/data/Database-Files/
+
+# --- Input / result data (never commit study data) ---
+*.fasta
+*.fa
+*.fastq
+*.fq
+*.tsv
+*.csv
+*.xlsx
+# ...but the reference databases that ship with the tool are required:
+!geneGUI/data/IMGT_Human_Database/*.fasta
+!geneGUI/data/IMGT_Mouse_Database/*.fasta
+!geneGUI/data/internal_data/**
+!geneGUI/data/optional_data/**
+!backend/requirements.txt
+
+# --- Editor / OS ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.code-workspace

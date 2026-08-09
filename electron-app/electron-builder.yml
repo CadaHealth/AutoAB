@@ -65,6 +65,10 @@ mac:
   entitlementsInherit: entitlements.mac.plist
   extendInfo:
     NSAppleEventsUsageDescription: "This app needs access to run analysis scripts."
+    # Electron 28 and the bundled CPython are both built with minos 11.0, so
+    # anything older cannot launch. Declaring it makes the Finder say so
+    # instead of letting the app crash on start.
+    LSMinimumSystemVersion: "11.0"
 
 dmg:
   contents:

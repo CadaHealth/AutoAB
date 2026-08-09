@@ -46,6 +46,49 @@
     'download-r': 'Download R',
   };
 
+  /**
+   * Shown before the repair starts. A password prompt that appears with no
+   * warning reads like something went wrong, so say what is about to happen
+   * and who is asking.
+   */
+  const FIX_NOTICES: Record<FixAction, { title: string; body: string; confirm: string } | null> = {
+    'install-rosetta': {
+      title: 'macOS will ask for your password',
+      body:
+        'Installing Rosetta 2 requires administrator rights, so macOS shows its own '
+        + 'password prompt. AutoAB never sees what you type. Rosetta 2 is Apple software, '
+        + 'downloaded by macOS itself, and it lets the Intel-only IgBLAST aligner run on '
+        + 'this Mac. It takes about a minute.',
+      confirm: 'Continue',
+    },
+    'install-r-packages': {
+      title: 'This downloads from CRAN',
+      body:
+        'The packages are installed into your personal R library, so no password is '
+        + 'needed. They are fetched and compiled from CRAN, which usually takes a few '
+        + 'minutes. Progress appears below.',
+      confirm: 'Install',
+    },
+    'download-r': null,
+  };
+
+  let pendingFix: FixAction | null = null;
+
+  /** Ask first when there is something worth warning about, otherwise just go. */
+  function requestFix(fix: FixAction) {
+    if (FIX_NOTICES[fix]) {
+      pendingFix = fix;
+    } else {
+      runFix(fix);
+    }
+  }
+
+  function confirmPendingFix() {
+    const fix = pendingFix;
+    pendingFix = null;
+    if (fix) runFix(fix);
+  }
+
   async function check() {
     checking = true;
     try {
@@ -149,8 +192,8 @@
             {#if item.status !== 'ok' && item.fix}
               <button
                 class="fix"
-                disabled={busyFix !== null}
-                on:click={() => runFix(item.fix)}
+                disabled={busyFix !== null || pendingFix !== null}
+                on:click={() => requestFix(item.fix)}
               >
                 {busyFix === item.fix ? 'Working…' : FIX_LABELS[item.fix]}
               </button>
@@ -158,6 +201,19 @@
           </li>
         {/each}
       </ul>
+
+      {#if pendingFix && FIX_NOTICES[pendingFix]}
+        <div class="notice">
+          <div class="notice-title">{FIX_NOTICES[pendingFix].title}</div>
+          <p class="notice-body">{FIX_NOTICES[pendingFix].body}</p>
+          <div class="notice-actions">
+            <button class="secondary" on:click={() => { pendingFix = null; }}>Cancel</button>
+            <button class="primary" on:click={confirmPendingFix}>
+              {FIX_NOTICES[pendingFix].confirm}
+            </button>
+          </div>
+        </div>
+      {/if}
 
       {#if log.length}
         <div class="log" bind:this={logEl}>
@@ -336,6 +392,34 @@
   }
   .fix:hover:not(:disabled) { background: #1d4ed8; }
   .fix:disabled { opacity: 0.5; cursor: default; }
+
+  .notice {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+
+  .notice-title {
+    font-size: 13.5px;
+    font-weight: 620;
+    color: #1e3a8a;
+    margin-bottom: 5px;
+  }
+
+  .notice-body {
+    margin: 0 0 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #1e40af;
+  }
+
+  .notice-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
 
   .log {
     max-height: 190px;

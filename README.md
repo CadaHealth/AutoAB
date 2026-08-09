@@ -36,6 +36,12 @@ cohort, one or more timepoints.
 
 ## Requirements
 
+To **use a packaged build**, only R ≥ 4.3 from [CRAN](https://cran.r-project.org/).
+Everything else is inside the app, and its Setup screen installs the R packages
+and Rosetta 2 for you.
+
+To **build or develop** it:
+
 - macOS or Linux (x86-64 binaries; on Apple Silicon they run under Rosetta 2)
 - Python ≥ 3.11
 - R ≥ 4.3 with `alakazam`, `shazam`, `ggplot2`, `dplyr`, `tidyr`, `ape`
@@ -89,9 +95,15 @@ install.packages(c("ggplot2", "dplyr", "tidyr", "ape", "alakazam", "shazam"))
 
 ```sh
 cd electron-app
-npm run dev          # development, with live reload
-npm run package:mac  # or build a distributable app bundle
+npm run dev                # development, with live reload
+npm run package:mac        # distributable bundle, both Mac architectures
+npm run package:mac:arm64  # Apple Silicon only, quicker
 ```
+
+The `package:*` scripts fetch IgBLAST and build the bundled Python runtime
+first, so a packaged app is self-contained apart from R. Building the Intel
+runtime on an Apple Silicon Mac needs Rosetta 2; use the `:arm64` script to
+skip that.
 
 The wizard walks you through picking an input format, naming cohorts, choosing
 the species and reference database, and starting the run. Reference BLAST
@@ -145,29 +157,40 @@ be pinned by entering a fixed value. For a deterministic estimate instead, set
 
 ## What a packaged build does and does not include
 
-AutoAB is not a self-contained application, and a packaged `.dmg` will not run
-on a machine that has nothing else installed. The bundle ships the analysis
-code, the IgBLAST binaries and the reference databases, but the pipeline is
-Python and R, and neither runtime is bundled.
+A packaged `.dmg` carries its own Python, so **R is the only thing a user has
+to install.** The app checks for it on launch and offers to install what it can
+by itself.
 
 | | Bundled | Must already be on the machine |
 |---|---|---|
 | Analysis code (`backend/`) | ✅ | |
 | IgBLAST, makeblastdb | ✅ | |
 | IMGT references, CoV-AbDab | ✅ | |
-| Python interpreter | | ✅ Python ≥ 3.11 |
-| changeo, presto, biopython, pandas | | ✅ `pip install -r backend/requirements.txt` |
-| R | | ✅ R ≥ 4.3 |
-| alakazam, shazam, ape | | ✅ `install.packages(...)` |
+| Python interpreter | ✅ CPython 3.11, relocatable | |
+| changeo, presto, biopython, pandas | ✅ preinstalled into it | |
+| Rosetta 2 (Apple Silicon only) | | the app installs it for you |
+| R | | ✅ R ≥ 4.3, from [CRAN](https://cran.r-project.org/) |
+| alakazam, shazam, ape, jsonlite | | the app installs them for you |
 
-The app locates whichever Python has changeo/presto installed at startup; if it
-finds none, the backend never starts. Set `AUTOAB_PYTHON` to point it at the
-right interpreter.
+Rosetta 2 appears on the list because NCBI publishes IgBLAST for macOS as an
+Intel binary only; there is no Apple Silicon build to bundle.
 
-The conda environment above collapses all of that into one command, which is
-the practical answer. Making the app genuinely double-click-installable is a
-larger job, a relocation attempt for R was carried out and is written up, with
-measurements, in [docs/STANDALONE.md](docs/STANDALONE.md).
+The bundled interpreter is built by `scripts/bundle-python.sh` and lands at
+`Resources/python` inside the app. It is preferred over anything on the
+machine, so a user's own Python cannot interfere; `AUTOAB_PYTHON` still
+overrides it. A source checkout without that runtime falls back to the
+system Python exactly as before, so the conda path above keeps working for
+development.
+
+The **Setup** screen (top right of the window, and shown automatically at
+launch when something is missing) reports what is present, explains what is
+not, and runs the two installs it can perform: Rosetta 2 via the standard macOS
+authentication prompt, and the R packages into the user library, no
+administrator rights needed.
+
+R itself stays a manual install. It bakes its own path into its binaries and
+package tree, and a relocation attempt is written up with measurements in
+[docs/STANDALONE.md](docs/STANDALONE.md).
 
 ## Code signing
 

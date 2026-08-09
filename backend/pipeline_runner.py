@@ -35,7 +35,9 @@ sys.path.insert(0, backend_dir)
 from utils import clean as cl
 from utils import blast
 from utils import clonality as clone
-from utils.clonalityFunctions import make_db, define_clonality, create_germline, findDist
+from utils.clonalityFunctions import (
+    make_db, define_clonality, create_germline, findDist, ThresholdUnavailable,
+)
 from utils.toolpaths import exe, find_changeo_script, find_igblast_binary, find_rscript
 
 # Try to import DL clustering (optional)
@@ -789,15 +791,30 @@ class PipelineRunner:
                 for tp_label in self.timepoint_labels:
                     tp_db_path = tp_paths.get(tp_label)
                     if not tp_db_path or not os.path.exists(tp_db_path):
-                        self.emit.log("warn", f"No db-pass for timepoint {tp_label}, using default 0.1")
-                        timepoint_thresholds.append({"label": tp_label, "calculated": 0.1})
+                        self.emit.log("warn", f"No db-pass for timepoint {tp_label}")
+                        timepoint_thresholds.append({
+                            "label": tp_label,
+                            "error": "No aligned sequences for this timepoint, so no threshold could be estimated.",
+                        })
                         continue
 
                     tp_dir = os.path.dirname(tp_db_path)
                     plot_path = os.path.join(tp_dir, 'distributionPlot.png')
 
                     self.emit.progress("threshold", 35, f"Calculating threshold for {tp_label}...")
-                    calculated_dist = findDist(tp_db_path, pathToScript=script_path, pathToPlot=plot_path)
+                    try:
+                        calculated_dist = findDist(tp_db_path, pathToScript=script_path, pathToPlot=plot_path)
+                    except ThresholdUnavailable as e:
+                        # Surfaced in the dialog so the user can enter a value
+                        # deliberately. Never silently substituted.
+                        self.emit.log("error", f"  {tp_label}: {e.message}")
+                        if e.detail:
+                            self.emit.log("debug", f"  {tp_label}: {e.detail}")
+                        timepoint_thresholds.append({
+                            "label": tp_label, "error": e.message, "detail": e.detail,
+                        })
+                        continue
+
                     self.emit.log("info", f"  {tp_label}: calculated threshold = {calculated_dist}")
                     tp_entry = {"label": tp_label, "calculated": calculated_dist}
                     # Embed the distribution plot as base64 if it was generated
@@ -817,23 +834,37 @@ class PipelineRunner:
             else:
                 # Single-cohort mode (backward compat)
                 plot_path = os.path.join(self.output_dir, 'distributionPlot.png')
-                calculated_dist = findDist(db_pass_path, pathToScript=script_path, pathToPlot=plot_path)
-                self.emit.log("info", f"Calculated distance threshold: {calculated_dist}")
+                calculated_dist = None
+                try:
+                    calculated_dist = findDist(db_pass_path, pathToScript=script_path, pathToPlot=plot_path)
+                    self.emit.log("info", f"Calculated distance threshold: {calculated_dist}")
+                except ThresholdUnavailable as e:
+                    self.emit.log("error", e.message)
+                    if e.detail:
+                        self.emit.log("debug", e.detail)
 
-                # Embed the distribution plot as base64 if it was generated
-                plot_b64 = None
-                if os.path.exists(plot_path):
-                    try:
-                        with open(plot_path, 'rb') as f:
-                            plot_b64 = base64.b64encode(f.read()).decode('ascii')
-                    except Exception as e:
-                        self.emit.log("warn", f"Could not read distribution plot: {e}")
+                if calculated_dist is None:
+                    timepoint_thresholds = [{"label": "_global", "error": e.message, "detail": e.detail}]
+                    NDJSONEmitter.emit({
+                        "type": "threshold_request",
+                        "timepoint_thresholds": timepoint_thresholds,
+                    })
+                else:
+                    # Embed the distribution plot as base64 if it was generated
+                    plot_b64 = None
+                    if os.path.exists(plot_path):
+                        try:
+                            with open(plot_path, 'rb') as f:
+                                plot_b64 = base64.b64encode(f.read()).decode('ascii')
+                        except Exception as e:
+                            self.emit.log("warn", f"Could not read distribution plot: {e}")
 
-                NDJSONEmitter.emit({
-                    "type": "threshold_request",
-                    "calculated": calculated_dist,
-                    "timepoint_thresholds": [{"label": "_global", "calculated": calculated_dist, **({"plot_base64": plot_b64} if plot_b64 else {})}]
-                })
+                    timepoint_thresholds = [{"label": "_global", "calculated": calculated_dist, **({"plot_base64": plot_b64} if plot_b64 else {})}]
+                    NDJSONEmitter.emit({
+                        "type": "threshold_request",
+                        "calculated": calculated_dist,
+                        "timepoint_thresholds": timepoint_thresholds,
+                    })
             
             self.emit.log("info", "Waiting for threshold response from user...")
             sys.stdout.flush()
@@ -868,22 +899,28 @@ class PipelineRunner:
                 except json.JSONDecodeError as e:
                     self.emit.log("warn", f"Failed to parse threshold response JSON: {response_line[:100]}, error: {str(e)}")
             
-            # Fallback: use calculated values
-            if self.timepoint_labels:
-                fallback = {}
-                for item in timepoint_thresholds:
-                    fallback[item['label']] = item['calculated']
-                self.emit.log("info", f"No valid response, using calculated thresholds: {fallback}")
-                return fallback
-            else:
-                self.emit.log("info", f"No valid response, using calculated threshold: {calculated_dist}")
-                return {'_global': calculated_dist}
-            
+            # No usable answer came back. Fall back to the values R computed,
+            # but only where it actually computed one: inventing a threshold for
+            # the rest would produce clone assignments that look valid and are
+            # not.
+            unresolved = [i['label'] for i in timepoint_thresholds if i.get('calculated') is None]
+            if unresolved:
+                self.emit.log(
+                    "error",
+                    "No threshold could be established for: " + ", ".join(unresolved)
+                    + ". Enter a value in the threshold dialog, or install R and run the analysis again."
+                )
+                return None
+
+            fallback = {i['label']: i['calculated'] for i in timepoint_thresholds}
+            self.emit.log("info", f"No valid response, using calculated thresholds: {fallback}")
+            return fallback
+
         except Exception as e:
+            # Deliberately no numeric fallback here. Returning None aborts the
+            # run, which is the honest outcome when the threshold is unknown.
             self.emit.log("error", f"Threshold calculation failed: {str(e)}")
-            if self.timepoint_labels:
-                return {tp: 0.1 for tp in self.timepoint_labels}
-            return {'_global': 0.1}
+            return None
     
     def _restore_d_gene_fields(self, db_pass_path: str, clone_pass_path: str):
         """Restore D-gene alignment fields that DefineClones.py strips.
@@ -2302,7 +2339,13 @@ class PipelineRunner:
             # Step 7: Calculate thresholds (per timepoint or single global)
             thresholds = self.calculate_thresholds()
             if thresholds is None or self.check_cancelled():
-                self.emit.complete(False, "Cancelled by user")
+                # Distinguish a deliberate cancel from a threshold that could
+                # not be established; reporting the latter as "cancelled" hid
+                # missing-R failures behind a user-looking message.
+                if self.cancelled or self.check_cancelled():
+                    self.emit.complete(False, "Cancelled by user")
+                else:
+                    self.emit.complete(False, "No clonal distance threshold could be established, see the log above")
                 return False
             
             # Step 8: Run clonality analysis (per timepoint or single global)

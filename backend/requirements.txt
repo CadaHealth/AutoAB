@@ -19,3 +19,9 @@ airr==1.5.1
 
 changeo==1.3.4
 presto==0.7.6
+
+# airr 1.5.1 still imports pkg_resources, which setuptools removed in 81.
+# System Pythons usually carry an older setuptools so this goes unnoticed, but
+# any clean environment (venv, or the runtime built by scripts/bundle-python.sh)
+# fails at `import airr` without the pin.
+setuptools<81

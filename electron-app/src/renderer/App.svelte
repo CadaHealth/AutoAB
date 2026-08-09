@@ -5,6 +5,7 @@
   import Wizard from './routes/wizard/Wizard.svelte';
   import Results from './routes/results/Results.svelte';
   import ThresholdDialog from './lib/components/ThresholdDialog.svelte';
+  import DependencyGate from './lib/components/DependencyGate.svelte';
   import SessionSidebar from './lib/components/SessionSidebar.svelte';
   import PasswordGate from './lib/components/PasswordGate.svelte';
   import { loadDemoData } from './lib/demo-loader';
@@ -15,6 +16,12 @@
   let demoError = '';
 
   let sessionSidebar: SessionSidebar;
+
+  // Setup screen. Opened automatically when a required component is missing,
+  // and always dismissible so a user is never trapped behind it.
+  let showDependencyGate = false;
+  let dependencyGateDismissible = true;
+  let depsNeedAttention = false;
   
   // Track fasta_dir from latest result so we can save it to session history
   let lastFastaDir = '';
@@ -107,10 +114,27 @@
     }
   }
   
+  /**
+   * Surface the setup screen on launch when something the pipeline needs is
+   * missing, rather than letting the run fail halfway through.
+   */
+  async function checkDependenciesOnStartup() {
+    if (!window.electronAPI?.checkDependencies) return;
+    try {
+      const report = await window.electronAPI.checkDependencies();
+      depsNeedAttention = !report.ok;
+      if (!report.ok) showDependencyGate = true;
+    } catch (e) {
+      console.warn('[App] Dependency check failed:', e);
+    }
+  }
+
   onMount(() => {
     // Migrate old single-key persistence to session array (one-time)
     migrateOldPersistence();
-    
+
+    checkDependenciesOnStartup();
+
     // Debug: Check if electronAPI is available
     console.log('[App] App mounted, checking electronAPI...');
     console.log('[App] window.electronAPI:', window.electronAPI);
@@ -561,6 +585,16 @@
             ← New Analysis
           </button>
         {/if}
+        {#if !IS_DEMO}
+          <button
+            class="btn btn-ghost btn-sm"
+            class:deps-attention={depsNeedAttention}
+            on:click={() => { showDependencyGate = true; }}
+            title="Check the components AutoAB needs"
+          >
+            {depsNeedAttention ? 'Setup needed' : 'Setup'}
+          </button>
+        {/if}
       </div>
     </div>
   </header>
@@ -579,6 +613,15 @@
     </main>
   </div>
   
+  <!-- Setup / dependency screen -->
+  {#if showDependencyGate}
+    <DependencyGate
+      dismissible={dependencyGateDismissible}
+      on:ready={() => { depsNeedAttention = false; }}
+      on:close={() => { showDependencyGate = false; dependencyGateDismissible = true; }}
+    />
+  {/if}
+
   <!-- Threshold dialog -->
   {#if $analysisState.thresholdRequest !== null}
     <ThresholdDialog
@@ -716,7 +759,18 @@
     color: var(--text-primary);
     margin: 0;
   }
-  
+
+  /* Draws the eye to the Setup button when a component is missing, without
+     the alarm of a modal the user has already dismissed once. */
+  .deps-attention {
+    color: #9a3412;
+    background: #fff7ed;
+    border-radius: 6px;
+  }
+  .deps-attention:hover {
+    background: #ffedd5;
+  }
+
   .app-body {
     flex: 1;
     display: flex;

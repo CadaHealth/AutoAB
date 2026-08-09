@@ -2,6 +2,11 @@
   "name": "bcr-analysis",
   "version": "1.0.0",
   "description": "B-Cell Repertoire Analysis Tool",
+  "author": "Cada Health",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CadaHealth/AutoAB.git"
+  },
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"wait-on dist/main/index.js dist/preload/index.js http://localhost:5173 && npm run start\"",
@@ -16,10 +21,14 @@
     "preview:web": "vite build && npx serve dist/renderer",
     "start": "electron .",
     "preview": "npm run build && electron .",
-    "package": "npm run build && electron-builder",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:win": "npm run build && electron-builder --win",
-    "test:e2e": "npm run build && node scripts/e2e-run.mjs"
+    "bundle:python": "bash ../scripts/bundle-python.sh",
+    "bundle:deps": "bash ../scripts/install.sh && bash ../scripts/bundle-python.sh",
+    "package": "npm run build && electron-builder --publish never",
+    "package:mac": "bash ../scripts/install.sh && bash ../scripts/bundle-python.sh --all && npm run build && electron-builder --mac --x64 --arm64 --publish never",
+    "package:mac:arm64": "bash ../scripts/install.sh && bash ../scripts/bundle-python.sh --arch arm64 && npm run build && electron-builder --mac --arm64 --publish never",
+    "package:win": "npm run build && electron-builder --win --publish never",
+    "test:e2e": "npm run build && node scripts/e2e-run.mjs",
+    "verify:bundle": "node scripts/verify-bundle.mjs"
   },
   "dependencies": {
     "d3": "^7.9.0",
@@ -43,54 +52,5 @@
     "typescript": "^5.3.2",
     "vite": "^5.0.6",
     "wait-on": "^7.2.0"
-  },
-  "build": {
-    "appId": "com.bcr-analysis.app",
-    "productName": "Clono",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "static/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "../backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!__pycache__/**"
-        ]
-      },
-      {
-        "from": "../geneGUI/bin",
-        "to": "bin"
-      },
-      {
-        "from": "../geneGUI/data",
-        "to": "data"
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.healthcare-fitness",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "static/icon.icns"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "static/icon.ico"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "category": "Science"
-    }
   }
 }

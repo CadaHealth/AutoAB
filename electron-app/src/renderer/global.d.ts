@@ -171,6 +171,31 @@ interface ElectronAPI {
   fileExists: (filePath: string) => Promise<boolean>;
   readDir: (dirPath: string) => Promise<{ success: boolean; files?: string[]; error?: string }>;
   readImageBase64: (imagePath: string) => Promise<{ success: boolean; data?: string; error?: string }>;
+
+  // Dependencies / setup screen
+  checkDependencies: () => Promise<DependencyReport>;
+  runDependencyFix: (fix: FixAction) => Promise<{ success: boolean; message: string }>;
+  openRDownloadPage: () => Promise<{ success: boolean; url: string }>;
+  onDependencyFixLog: (callback: (line: string) => void) => () => void;
+}
+
+type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r';
+
+interface DependencyItem {
+  id: string;
+  label: string;
+  status: 'ok' | 'missing' | 'error';
+  required: boolean;
+  detail?: string;
+  problem?: string;
+  fix?: FixAction;
+}
+
+interface DependencyReport {
+  ok: boolean;
+  items: DependencyItem[];
+  platform: string;
+  arch: string;
 }
 
 declare global {

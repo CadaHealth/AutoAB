@@ -28,6 +28,27 @@ interface AppPaths {
   temp: string;
 }
 
+// Mirrors src/main/dependency-check.ts. Declared rather than imported so the
+// preload bundle stays free of main-process code.
+type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r';
+
+interface DependencyItem {
+  id: string;
+  label: string;
+  status: 'ok' | 'missing' | 'error';
+  required: boolean;
+  detail?: string;
+  problem?: string;
+  fix?: FixAction;
+}
+
+interface DependencyReport {
+  ok: boolean;
+  items: DependencyItem[];
+  platform: string;
+  arch: string;
+}
+
 interface DatabasePaths {
   type: string;
   v: string;
@@ -229,8 +250,24 @@ const api = {
   readDir: (dirPath: string): Promise<{ success: boolean; files?: string[]; error?: string }> => 
     ipcRenderer.invoke('fs:readDir', dirPath),
   
-  readImageBase64: (imagePath: string): Promise<{ success: boolean; data?: string; error?: string }> => 
-    ipcRenderer.invoke('fs:readImageBase64', imagePath)
+  readImageBase64: (imagePath: string): Promise<{ success: boolean; data?: string; error?: string }> =>
+    ipcRenderer.invoke('fs:readImageBase64', imagePath),
+
+  // Dependencies
+  checkDependencies: (): Promise<DependencyReport> =>
+    ipcRenderer.invoke('deps:check'),
+
+  runDependencyFix: (fix: FixAction): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke('deps:runFix', fix),
+
+  openRDownloadPage: (): Promise<{ success: boolean; url: string }> =>
+    ipcRenderer.invoke('deps:openDownloadPage'),
+
+  onDependencyFixLog: (callback: (line: string) => void) => {
+    const handler = (_: any, line: string) => callback(line);
+    ipcRenderer.on('deps:fixLog', handler);
+    return () => ipcRenderer.removeListener('deps:fixLog', handler);
+  }
 };
 
 // Expose the API to the renderer

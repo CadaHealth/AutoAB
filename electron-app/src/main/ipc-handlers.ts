@@ -4,25 +4,35 @@
  * Handles inter-process communication between main and renderer processes
  */
 
-import { ipcMain, dialog, BrowserWindow, app } from 'electron';
+import { ipcMain, dialog, BrowserWindow, app, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { BackendRunner } from './backend-runner';
 import { loadResultsFromDisk } from './results-loader';
 import { stageFromAirr, type AirrSampleTagAssignment } from './airr-staging';
+import { checkDependencies, runFix, type FixAction } from './dependency-check';
 
 interface AppPaths {
   backendDir: string;
   binDir: string;
   dataDir: string;
+  pythonPath: string;
+  pythonIsBundled: boolean;
 }
+
+/** Where users get R when AutoAB cannot install it for them. */
+const R_DOWNLOAD_URL = process.platform === 'darwin'
+  ? 'https://cran.r-project.org/bin/macosx/'
+  : process.platform === 'win32'
+    ? 'https://cran.r-project.org/bin/windows/base/'
+    : 'https://cran.r-project.org/bin/linux/';
 
 export function setupIpcHandlers(
   mainWindow: BrowserWindow | null,
   backendRunner: BackendRunner,
   paths: AppPaths
 ): void {
-  
+
   // Remove existing handlers to avoid duplicates
   ipcMain.removeHandler('dialog:selectDirectory');
   ipcMain.removeHandler('dialog:selectFile');
@@ -31,6 +41,33 @@ export function setupIpcHandlers(
   ipcMain.removeHandler('pipeline:loadResults');
   ipcMain.removeHandler('pipeline:runPublicCloneAnalysis');
   ipcMain.removeHandler('pipeline:runCovidMatchingAnalysis');
+  ipcMain.removeHandler('deps:check');
+  ipcMain.removeHandler('deps:runFix');
+  ipcMain.removeHandler('deps:openDownloadPage');
+
+  // Dependencies: report what is installed and what is missing.
+  ipcMain.handle('deps:check', async () => {
+    return checkDependencies({
+      pythonPath: paths.pythonPath,
+      binDir: paths.binDir,
+      pythonIsBundled: paths.pythonIsBundled,
+    });
+  });
+
+  // Dependencies: perform a repair, streaming installer output to the renderer.
+  ipcMain.handle('deps:runFix', async (event, fix: FixAction) => {
+    const sender = event.sender;
+    const result = await runFix(fix, (line) => {
+      if (!sender.isDestroyed()) sender.send('deps:fixLog', line);
+    });
+    return result;
+  });
+
+  // Dependencies: open CRAN in the user's browser.
+  ipcMain.handle('deps:openDownloadPage', async () => {
+    await shell.openExternal(R_DOWNLOAD_URL);
+    return { success: true, url: R_DOWNLOAD_URL };
+  });
 
   // Dialog: Select directory
   // Detects folder structure:

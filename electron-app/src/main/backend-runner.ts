@@ -57,10 +57,16 @@ function pythonUserBin(pythonPath: string | undefined): string | null {
  * which on a typical macOS install are at `~/Library/Python/<ver>/bin/`.
  *
  *   1. binDir (igblast, etc., bundled with the app)
- *   2. Python user-installed scripts bin (from `python -m site --user-base`)
- *   3. parent of pythonPath if set (the Python framework's own bin)
+ *   2. parent of pythonPath if set (the interpreter's own bin)
+ *   3. Python user-installed scripts bin (from `python -m site --user-base`)
  *   4. /opt/homebrew/bin, /usr/local/bin (common Homebrew/conda spots)
  *   5. process.env.PATH (inherited from the user's shell)
+ *
+ * The interpreter's own bin deliberately outranks the user-base bin. With the
+ * bundled runtime both exist, and a stray `pip install --user changeo` in the
+ * user's home would otherwise shadow the version the app ships with. It also
+ * makes the `#!/usr/bin/env python3` shebangs in the bundled console scripts
+ * resolve back to the bundled interpreter rather than the system one.
  *
  * Optional override: BCR_EXTRA_PATH env var, prepended.
  */
@@ -68,15 +74,15 @@ function buildSpawnPath(binDir: string, pythonPath?: string): string {
   const parts: string[] = [binDir];
   if (process.env.BCR_EXTRA_PATH) parts.unshift(process.env.BCR_EXTRA_PATH);
 
-  // Python user-base bin, where pip --user scripts (changeo, presto) live
-  const userBin = pythonUserBin(pythonPath);
-  if (userBin) parts.push(userBin);
-
-  // Parent of the Python interpreter (where some envs put scripts)
+  // Parent of the Python interpreter (where its console scripts live)
   if (pythonPath) {
     const pyBin = path.dirname(pythonPath);
     if (fs.existsSync(pyBin)) parts.push(pyBin);
   }
+
+  // Python user-base bin, where pip --user scripts (changeo, presto) live
+  const userBin = pythonUserBin(pythonPath);
+  if (userBin) parts.push(userBin);
 
   // Common Homebrew / conda locations
   for (const candidate of ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), 'miniconda3/bin'), path.join(os.homedir(), 'anaconda3/bin')]) {

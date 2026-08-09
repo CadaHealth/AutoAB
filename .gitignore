@@ -13,6 +13,11 @@ electron-app/.vite/
 npm-debug.log*
 .eslintcache
 
+# Bundled Python interpreters, ~300 MB each, rebuilt by
+# scripts/bundle-python.sh. The version is pinned in that script, so there is
+# nothing here worth versioning.
+electron-app/runtime/
+
 # --- Python ---
 __pycache__/
 *.py[cod]

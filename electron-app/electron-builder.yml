@@ -6,6 +6,10 @@ directories:
   output: release
   buildResources: static
 
+# Fails the build when the bundled Python runtime for the target architecture
+# is missing, instead of quietly shipping an app without an interpreter.
+beforePack: scripts/before-pack.js
+
 files:
   - dist/**/*
   - static/**/*
@@ -34,18 +38,27 @@ extraResources:
     filter:
       - "**/*"
 
+  # Self-contained Python interpreter with changeo/presto/biopython already
+  # installed, built by scripts/bundle-python.sh. ${arch} keeps the arm64 and
+  # x64 builds from picking up each other's interpreter.
+  - from: runtime/${arch}/python
+    to: python
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+      - "!**/test/**"
+      - "!**/tests/**"
+
 mac:
   category: public.app-category.healthcare-fitness
   icon: static/icon.icns
+  # Architectures come from the command line, so `--arm64` really means arm64
+  # only. Listing them here instead made every build produce both, including
+  # ones whose Python runtime had not been built.
   target:
-    - target: dmg
-      arch:
-        - x64
-        - arm64
-    - target: zip
-      arch:
-        - x64
-        - arm64
+    - dmg
+    - zip
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: entitlements.mac.plist
@@ -100,7 +113,9 @@ linux:
 appImage:
   license: LICENSE.txt
 
-publish:
-  provider: github
-  releaseType: release
+# No publish provider is configured on purpose. While one is present,
+# electron-builder computes auto-update metadata for every artifact even under
+# `--publish never`, and fails on it. Publishing to GitHub Releases should be a
+# deliberate, separate step: pass the provider on the command line, or add the
+# block back together with a `repository` field in package.json.
 

@@ -180,9 +180,29 @@ function createWindow(): void {
 }
 
 /**
+ * The interpreter that ships inside the app, built by scripts/bundle-python.sh.
+ *
+ * Packaged, it lands at Resources/python. Unpackaged it sits per-architecture
+ * under electron-app/runtime/, because a cross-built Intel runtime has to be
+ * able to coexist with the native one.
+ *
+ * Returns null when no runtime was bundled, which is the normal state of a
+ * fresh checkout: the script has to be run once before packaging.
+ */
+function getBundledPythonPath(): string | null {
+  const exe = process.platform === 'win32' ? 'python.exe' : 'python3';
+  const candidate = isDev
+    ? path.join(getResourcesPath(), 'runtime', process.arch, 'python', 'bin', exe)
+    : path.join(process.resourcesPath, 'python', 'bin', exe);
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+/**
  * Locate a Python interpreter that has the pipeline's dependencies installed.
  *
- * The pipeline needs the interpreter that owns changeo/presto, which is not
+ * The bundled runtime wins whenever it is present, so a packaged app never
+ * depends on what the user happens to have installed. Failing that, the
+ * pipeline needs the interpreter that owns changeo/presto, which is not
  * necessarily the first `python3` on PATH, a machine can easily have several.
  * Candidates are probed in order and the first one that can import changeo
  * wins. AUTOAB_PYTHON overrides the search entirely.
@@ -192,6 +212,9 @@ function resolvePythonPath(): string {
   if (override) return override;
 
   const candidates: string[] = [];
+
+  const bundled = getBundledPythonPath();
+  if (bundled) candidates.push(bundled);
 
   // An activated conda environment is the documented install path, so it wins.
   if (process.env.CONDA_PREFIX) {
@@ -219,7 +242,11 @@ function resolvePythonPath(): string {
     }
   }
 
-  console.warn('[Main] No Python with changeo/presto found; falling back to python3. Set AUTOAB_PYTHON to override.');
+  console.warn(
+    bundled
+      ? `[Main] Bundled runtime at ${bundled} cannot import changeo/presto and no system Python could either.`
+      : '[Main] No bundled runtime (run scripts/bundle-python.sh) and no system Python with changeo/presto.'
+  );
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
@@ -248,7 +275,9 @@ app.whenReady().then(() => {
   setupIpcHandlers(mainWindow, backendRunner!, {
     backendDir: getBackendPath(),
     binDir: getBinPath(),
-    dataDir: getDataPath()
+    dataDir: getDataPath(),
+    pythonPath: resolvePythonPath(),
+    pythonIsBundled: getBundledPythonPath() !== null
   });
 
   app.on('activate', () => {

@@ -376,8 +376,13 @@ async function checkR(): Promise<DependencyItem[]> {
  * principles from identical data and say nothing about it, so the screen states
  * which one this machine will use.
  */
-async function checkIqtree(): Promise<DependencyItem> {
-  for (const cmd of ['iqtree2', 'iqtree']) {
+async function checkIqtree(input: DependencyCheckInput): Promise<DependencyItem> {
+  // The bundled copy first: a packaged app should not change inference method
+  // depending on what the user happens to have installed.
+  const bundled = path.join(input.binDir, process.platform === 'win32' ? 'iqtree2.exe' : 'iqtree2');
+  const candidates = fs.existsSync(bundled) ? [bundled, 'iqtree2', 'iqtree'] : ['iqtree2', 'iqtree'];
+
+  for (const cmd of candidates) {
     const res = await tryRun(cmd, ['--version']);
     if (res.ok) {
       const version = firstLine(`${res.stdout}${res.stderr}`);
@@ -390,7 +395,8 @@ async function checkIqtree(): Promise<DependencyItem> {
         // fewer than four unique sequences after collapsing go to
         // neighbour-joining even when IQ-TREE is installed, so the method is a
         // per-tree property. The run log reports the split.
-        detail: `${version || cmd}. Maximum likelihood where a clone has enough unique sequences.`,
+        detail: (cmd === bundled ? 'Bundled with AutoAB. ' : '')
+          + `${version || cmd}. Maximum likelihood where a clone has enough unique sequences.`,
       };
     }
   }
@@ -415,7 +421,7 @@ export async function checkDependencies(input: DependencyCheckInput): Promise<De
     checkPython(input),
     checkIgblast(input),
     checkR(),
-    checkIqtree(),
+    checkIqtree(input),
   ]);
 
   const items: DependencyItem[] = [python, ...igblast, ...r, iqtree];

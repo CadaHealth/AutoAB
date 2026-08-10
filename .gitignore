@@ -2,6 +2,7 @@
 geneGUI/bin/igblastn
 geneGUI/bin/igblastp
 geneGUI/bin/makeblastdb
+geneGUI/bin/iqtree2
 geneGUI/bin/internal_data
 
 # --- Node / Electron ---

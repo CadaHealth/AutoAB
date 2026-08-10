@@ -28,7 +28,22 @@ dir.create(trees_dir, showWarnings = FALSE, recursive = TRUE)
 # Check if IQ-TREE2 is available
 iqtree_available <- FALSE
 iqtree_cmd <- NULL
-for (cmd in c("iqtree2", "iqtree")) {
+
+# The copy shipped inside the application wins over whatever is on PATH, so a
+# packaged run does not depend on the user having installed IQ-TREE and cannot
+# silently switch inference method between machines. AUTOAB_BIN_DIR is set by
+# the Electron main process; in a source checkout it points at geneGUI/bin.
+bundled_bin_dir <- Sys.getenv("AUTOAB_BIN_DIR")
+if (nzchar(bundled_bin_dir)) {
+    bundled_iqtree <- file.path(bundled_bin_dir, "iqtree2")
+    if (file.exists(bundled_iqtree)) {
+        iqtree_available <- TRUE
+        iqtree_cmd <- bundled_iqtree
+        cat(paste("Found bundled IQ-TREE:", bundled_iqtree, "\n"))
+    }
+}
+
+if (!iqtree_available) for (cmd in c("iqtree2", "iqtree")) {
     check_result <- system(paste("which", cmd), ignore.stdout = TRUE, ignore.stderr = TRUE)
     if (check_result == 0) {
         iqtree_available <- TRUE

@@ -59,8 +59,24 @@ def blast_get_top_hits_v(input_fp, db_V_fp, db_J_fp, db_D_fp, organism='human', 
     if db_C_fp:
         cmd.extend(['-c_region_db', db_C_fp])
     cmd.extend(['-query', input_fp, '-outfmt', '7 std qseq sseq btop', '-auxiliary_data', aux_data_path])
-    a = subprocess.Popen(cmd, stdout=subprocess.PIPE, cwd=geneHome, env=env)
-    out = a.communicate()[0].decode('utf-8')
+    a = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=geneHome, env=env)
+    raw_out, raw_err = a.communicate()
+    out = raw_out.decode('utf-8')
+    err = raw_err.decode('utf-8', errors='ignore')
+
+    # IgBLAST's exit status used to be discarded, so an aligner that refused to
+    # start still produced an empty result table and the pipeline reported
+    # "IgBLAST analysis complete, found 0 hits" as ordinary progress. That is how
+    # a bundle sitting in a path with a space failed: BLAST cannot read such
+    # paths, said so on stderr, and nobody was listening.
+    if a.returncode != 0:
+        detail = (err or out or '').strip().splitlines()
+        raise RuntimeError(
+            'IgBLAST failed: ' + (detail[-1] if detail else f'exit code {a.returncode}')
+        )
+    if err.strip():
+        print(f'[igblastn] {err.strip()[:500]}')
+
     b = StringIO(out)
     # parse output into string
     all_data = [x.strip() for x in str(b.getvalue()).split('#')]

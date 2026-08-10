@@ -764,9 +764,21 @@ class PipelineRunner:
             outdata_path = os.path.join(self.output_dir, 'outdata.csv')
             df.to_csv(outdata_path)
             
+            # Zero hits is not a result, it is a failed alignment. Reporting it
+            # as ordinary progress let the run continue to the threshold step and
+            # die there on an empty table, far from the actual cause.
+            if len(df) == 0:
+                self.emit.log(
+                    "error",
+                    "IgBLAST aligned nothing. Either the input contains no recognisable "
+                    "receptor sequences, or the wrong species was selected, or the aligner "
+                    "could not read its reference databases."
+                )
+                return False
+
             self.emit.log("info", f"IgBLAST analysis complete, found {len(df)} hits")
             self.emit.result("igblast_output", path=outdata_path)
-            
+
             self.blast_df = df
             return True
             
@@ -861,17 +873,29 @@ class PipelineRunner:
                 # Single-cohort mode (backward compat)
                 plot_path = os.path.join(self.output_dir, 'distributionPlot.png')
                 calculated_dist = None
+                single_method = None
+                # Held in their own names: Python 3 unbinds the `except ... as e`
+                # variable at the end of the block, so reading e.message below
+                # raised NameError. The failure path therefore never emitted its
+                # request at all, and the pipeline stayed blocked on stdin, which
+                # is the same hang this error reporting was meant to prevent.
+                failure_message = None
+                failure_detail = None
                 try:
                     calculated_dist = findDist(db_pass_path, pathToScript=script_path, pathToPlot=plot_path)
                     single_method = _clonality_fns.last_threshold_method
                     self.emit.log("info", f"Distance threshold: {calculated_dist} ({single_method or 'method not reported'})")
                 except ThresholdUnavailable as e:
-                    self.emit.log("error", e.message)
-                    if e.detail:
-                        self.emit.log("debug", e.detail)
+                    failure_message = e.message
+                    failure_detail = e.detail
+                    self.emit.log("error", failure_message)
+                    if failure_detail:
+                        self.emit.log("debug", failure_detail)
 
                 if calculated_dist is None:
-                    timepoint_thresholds = [{"label": "_global", "error": e.message, "detail": e.detail}]
+                    timepoint_thresholds = [{"label": "_global",
+                                             "error": failure_message or "No threshold could be estimated.",
+                                             "detail": failure_detail}]
                     NDJSONEmitter.emit({
                         "type": "threshold_request",
                         "timepoint_thresholds": timepoint_thresholds,
@@ -2090,7 +2114,19 @@ class PipelineRunner:
                             v_start = int(row['v_sequence_start']) - 1 if pd.notna(row['v_sequence_start']) else 0
                             j_end = int(row['j_sequence_end']) if pd.notna(row['j_sequence_end']) else len(dna_seq)
                             vj_region = dna_seq[v_start:j_end]
-                            aa_seq = translate_dna_to_aa(vj_region)
+                            # Same germline reading frame as covid_db_matcher:
+                            # a contig starting inside FR1 has v_germline_start > 1,
+                            # and translating from offset 0 then frame-shifts,
+                            # stopping at the first spurious stop codon and
+                            # producing a short nonsense peptide.
+                            frame_offset = 0
+                            v_germ_start = row.get('v_germline_start')
+                            if pd.notna(v_germ_start):
+                                try:
+                                    frame_offset = (int(v_germ_start) - 1) % 3
+                                except (TypeError, ValueError):
+                                    frame_offset = 0
+                            aa_seq = translate_dna_to_aa(vj_region[frame_offset:])
                         except Exception as e:
                             self.emit.log("debug", f"Failed to translate sequence {seq_id}: {str(e)}")
                     

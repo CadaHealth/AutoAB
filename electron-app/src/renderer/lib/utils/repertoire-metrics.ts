@@ -234,16 +234,26 @@ export function computeDiversity(seqs: SequenceData[]): DiversityMetrics {
   const sizes = Array.from(csm.values());
   const uniqueClones = sizes.length;
   const totalSequences = seqs.length;
-  const meanCloneSize = uniqueClones > 0 ? totalSequences / uniqueClones : 0;
   const productiveCount = seqs.filter(s => s.productive !== false).length;
+
+  // Every fraction below is a share of the repertoire that clonality actually
+  // partitioned, so it has to be divided by the sequences that carry a clone id
+  // -- not by seqs.length. Clonality runs on the heavy chain alone, so a list of
+  // 1494 sequences can hold 653 clone-assigned ones, and dividing by the larger
+  // number made the largest clone read 0.0067 instead of 0.0153. Worse, the
+  // error scaled with how many light chains a sample happened to recover, so it
+  // varied per donor and per timepoint rather than shifting everything equally.
+  const clonedSequences = sizes.reduce((a, b) => a + b, 0);
+
+  const meanCloneSize = uniqueClones > 0 ? clonedSequences / uniqueClones : 0;
 
   // Clonal-expansion metrics (Shulman 2022 Fig 2B-style)
   const expandedSeqs = sizes.filter(s => s >= 2).reduce((a, b) => a + b, 0);
-  const expandedCloneFraction = totalSequences > 0 ? expandedSeqs / totalSequences : 0;
+  const expandedCloneFraction = clonedSequences > 0 ? expandedSeqs / clonedSequences : 0;
   const sortedDesc = [...sizes].sort((a, b) => b - a);
-  const top1CloneFraction = totalSequences > 0 ? (sortedDesc[0] ?? 0) / totalSequences : 0;
+  const top1CloneFraction = clonedSequences > 0 ? (sortedDesc[0] ?? 0) / clonedSequences : 0;
   const top10Sum = sortedDesc.slice(0, 10).reduce((a, b) => a + b, 0);
-  const top10CloneFraction = totalSequences > 0 ? top10Sum / totalSequences : 0;
+  const top10CloneFraction = clonedSequences > 0 ? top10Sum / clonedSequences : 0;
 
   return {
     shannonEntropy: shannonEntropy(sizes),

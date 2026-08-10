@@ -30,7 +30,7 @@ interface AppPaths {
 
 // Mirrors src/main/dependency-check.ts. Declared rather than imported so the
 // preload bundle stays free of main-process code.
-type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r';
+type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r' | 'download-iqtree';
 
 interface DependencyItem {
   id: string;
@@ -260,8 +260,8 @@ const api = {
   runDependencyFix: (fix: FixAction): Promise<{ success: boolean; message: string }> =>
     ipcRenderer.invoke('deps:runFix', fix),
 
-  openRDownloadPage: (): Promise<{ success: boolean; url: string }> =>
-    ipcRenderer.invoke('deps:openDownloadPage'),
+  openRDownloadPage: (which?: FixAction): Promise<{ success: boolean; url: string }> =>
+    ipcRenderer.invoke('deps:openDownloadPage', which),
 
   onDependencyFixLog: (callback: (line: string) => void) => {
     const handler = (_: any, line: string) => callback(line);

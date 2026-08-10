@@ -12,7 +12,7 @@
 
   const dispatch = createEventDispatcher<{ close: void; ready: void }>();
 
-  type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r';
+  type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r' | 'download-iqtree';
 
   interface DependencyItem {
     id: string;
@@ -44,6 +44,7 @@
     'install-rosetta': 'Install Rosetta 2',
     'install-r-packages': 'Install R packages',
     'download-r': 'Download R',
+    'download-iqtree': 'Download IQ-TREE 2',
   };
 
   /**
@@ -70,6 +71,7 @@
       confirm: 'Install',
     },
     'download-r': null,
+    'download-iqtree': null,
   };
 
   let pendingFix: FixAction | null = null;
@@ -104,8 +106,8 @@
   }
 
   async function runFix(fix: FixAction) {
-    if (fix === 'download-r') {
-      await window.electronAPI.openRDownloadPage();
+    if (fix === 'download-r' || fix === 'download-iqtree') {
+      await window.electronAPI.openRDownloadPage(fix);
       // Nothing to poll for, the user installs R outside the app and comes
       // back to re-check.
       return;

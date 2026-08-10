@@ -1742,7 +1742,27 @@ class PipelineRunner:
                     shutil.move(src, dst)
         
         tree_files = glob.glob(os.path.join(trees_out_dir, '*.newick'))
-        self.emit.log("info", f"[{label}] Built {len(tree_files)} trees")
+
+        # Which method actually produced them. IQ-TREE 2 is optional: without it
+        # the R script silently falls back to neighbour-joining, which is a
+        # different inference method, not a lesser version of the same one. The
+        # script reports the split and this used to discard it, so a run gave no
+        # way to tell maximum-likelihood trees from NJ trees afterwards.
+        method_note = ''
+        for line in (result.stdout or '').splitlines():
+            stripped = line.strip()
+            if stripped.startswith(('IQ-TREE2', 'Neighbor-Joining')):
+                self.emit.log("info", f"[{label}] {stripped}")
+                if stripped.startswith('Neighbor-Joining'):
+                    method_note = ' (neighbour-joining: IQ-TREE 2 was not available)'
+            elif stripped.startswith('WARNING: IQ-TREE2 not found'):
+                self.emit.log(
+                    "warn",
+                    f"[{label}] IQ-TREE 2 is not installed, so trees are built by neighbour-joining "
+                    "instead of maximum likelihood."
+                )
+
+        self.emit.log("info", f"[{label}] Built {len(tree_files)} trees{method_note}")
         return top_clones
     
     def build_trees(self) -> bool:

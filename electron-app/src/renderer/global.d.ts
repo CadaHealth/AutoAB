@@ -175,11 +175,11 @@ interface ElectronAPI {
   // Dependencies / setup screen
   checkDependencies: () => Promise<DependencyReport>;
   runDependencyFix: (fix: FixAction) => Promise<{ success: boolean; message: string }>;
-  openRDownloadPage: () => Promise<{ success: boolean; url: string }>;
+  openRDownloadPage: (which?: FixAction) => Promise<{ success: boolean; url: string }>;
   onDependencyFixLog: (callback: (line: string) => void) => () => void;
 }
 
-type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r';
+type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r' | 'download-iqtree';
 
 interface DependencyItem {
   id: string;

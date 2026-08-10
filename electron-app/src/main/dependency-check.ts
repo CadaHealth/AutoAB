@@ -19,7 +19,7 @@ export const REQUIRED_R_PACKAGES = ['alakazam', 'shazam', 'ape', 'jsonlite'];
 export type CheckStatus = 'ok' | 'missing' | 'error';
 
 /** A repair the app can carry out on the user's behalf. */
-export type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r';
+export type FixAction = 'install-rosetta' | 'install-r-packages' | 'download-r' | 'download-iqtree';
 
 export interface DependencyItem {
   id: string;
@@ -334,16 +334,55 @@ async function checkR(): Promise<DependencyItem[]> {
   return items;
 }
 
+/**
+ * IQ-TREE 2, which decides how lineage trees are inferred.
+ *
+ * Optional in the sense that the analysis completes without it, but not
+ * cosmetic: backend/scripts/build-trees-iqtree.R falls back to neighbour-joining
+ * on a raw distance matrix, a different inference method rather than a lesser
+ * version of maximum likelihood. Two machines would build trees on different
+ * principles from identical data and say nothing about it, so the screen states
+ * which one this machine will use.
+ */
+async function checkIqtree(): Promise<DependencyItem> {
+  for (const cmd of ['iqtree2', 'iqtree']) {
+    const res = await tryRun(cmd, ['--version']);
+    if (res.ok) {
+      const version = firstLine(`${res.stdout}${res.stderr}`);
+      return {
+        id: 'iqtree',
+        label: 'IQ-TREE 2',
+        status: 'ok',
+        required: false,
+        detail: `${version || cmd}. Lineage trees use maximum likelihood.`,
+      };
+    }
+  }
+
+  return {
+    id: 'iqtree',
+    label: 'IQ-TREE 2',
+    status: 'missing',
+    required: false,
+    problem:
+      'Not installed. Analyses still finish, but lineage trees are built by neighbour-joining '
+      + 'instead of maximum likelihood, which is a different method rather than a rougher one. '
+      + 'Install it if trees are part of what you report.',
+    fix: 'download-iqtree',
+  };
+}
+
 export async function checkDependencies(input: DependencyCheckInput): Promise<DependencyReport> {
-  // Run the three groups concurrently: they are independent, and R alone is
-  // slow enough that doing them in sequence is noticeable.
-  const [python, igblast, r] = await Promise.all([
+  // Run the groups concurrently: they are independent, and R alone is slow
+  // enough that doing them in sequence is noticeable.
+  const [python, igblast, r, iqtree] = await Promise.all([
     checkPython(input),
     checkIgblast(input),
     checkR(),
+    checkIqtree(),
   ]);
 
-  const items: DependencyItem[] = [python, ...igblast, ...r];
+  const items: DependencyItem[] = [python, ...igblast, ...r, iqtree];
 
   return {
     ok: items.every(i => !i.required || i.status === 'ok'),

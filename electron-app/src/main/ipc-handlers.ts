@@ -22,6 +22,9 @@ interface AppPaths {
   pythonIsBundled: boolean;
 }
 
+/** Where users get IQ-TREE 2, which AutoAB cannot install for them. */
+const IQTREE_DOWNLOAD_URL = 'https://iqtree.github.io/#download';
+
 /** Where users get R when AutoAB cannot install it for them. */
 const R_DOWNLOAD_URL = process.platform === 'darwin'
   ? 'https://cran.r-project.org/bin/macosx/'
@@ -66,9 +69,10 @@ export function setupIpcHandlers(
   });
 
   // Dependencies: open CRAN in the user's browser.
-  ipcMain.handle('deps:openDownloadPage', async () => {
-    await shell.openExternal(R_DOWNLOAD_URL);
-    return { success: true, url: R_DOWNLOAD_URL };
+  ipcMain.handle('deps:openDownloadPage', async (_event, which?: string) => {
+    const url = which === 'download-iqtree' ? IQTREE_DOWNLOAD_URL : R_DOWNLOAD_URL;
+    await shell.openExternal(url);
+    return { success: true, url };
   });
 
   // Dialog: Select directory

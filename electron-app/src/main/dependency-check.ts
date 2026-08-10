@@ -386,7 +386,11 @@ async function checkIqtree(): Promise<DependencyItem> {
         label: 'IQ-TREE 2',
         status: 'ok',
         required: false,
-        detail: `${version || cmd}. Lineage trees use maximum likelihood.`,
+        // Deliberately not "trees use maximum likelihood": clones left with
+        // fewer than four unique sequences after collapsing go to
+        // neighbour-joining even when IQ-TREE is installed, so the method is a
+        // per-tree property. The run log reports the split.
+        detail: `${version || cmd}. Maximum likelihood where a clone has enough unique sequences.`,
       };
     }
   }

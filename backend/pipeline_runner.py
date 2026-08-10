@@ -39,6 +39,7 @@ from utils.clonalityFunctions import (
     make_db, define_clonality, create_germline, findDist, ThresholdUnavailable,
 )
 from utils import toolpaths
+from utils import clonalityFunctions as _clonality_fns
 from utils.toolpaths import exe, find_changeo_script, find_igblast_binary, find_rscript
 
 # Try to import DL clustering (optional)
@@ -839,8 +840,9 @@ class PipelineRunner:
                         })
                         continue
 
-                    self.emit.log("info", f"  {tp_label}: calculated threshold = {calculated_dist}")
-                    tp_entry = {"label": tp_label, "calculated": calculated_dist}
+                    method = _clonality_fns.last_threshold_method
+                    self.emit.log("info", f"  {tp_label}: threshold = {calculated_dist} ({method or 'method not reported'})")
+                    tp_entry = {"label": tp_label, "calculated": calculated_dist, "method": method}
                     # Embed the distribution plot as base64 if it was generated
                     if os.path.exists(plot_path):
                         try:
@@ -861,7 +863,8 @@ class PipelineRunner:
                 calculated_dist = None
                 try:
                     calculated_dist = findDist(db_pass_path, pathToScript=script_path, pathToPlot=plot_path)
-                    self.emit.log("info", f"Calculated distance threshold: {calculated_dist}")
+                    single_method = _clonality_fns.last_threshold_method
+                    self.emit.log("info", f"Distance threshold: {calculated_dist} ({single_method or 'method not reported'})")
                 except ThresholdUnavailable as e:
                     self.emit.log("error", e.message)
                     if e.detail:
@@ -883,7 +886,9 @@ class PipelineRunner:
                         except Exception as e:
                             self.emit.log("warn", f"Could not read distribution plot: {e}")
 
-                    timepoint_thresholds = [{"label": "_global", "calculated": calculated_dist, **({"plot_base64": plot_b64} if plot_b64 else {})}]
+                    timepoint_thresholds = [{"label": "_global", "calculated": calculated_dist,
+                                             "method": single_method,
+                                             **({"plot_base64": plot_b64} if plot_b64 else {})}]
                     NDJSONEmitter.emit({
                         "type": "threshold_request",
                         "calculated": calculated_dist,

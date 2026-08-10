@@ -18,6 +18,11 @@ options(warn = 1)  # surface warnings as they happen, do not stop execution
 set.seed(42)
 
 UNAVAILABLE_MARKER <- "AUTOAB_THRESHOLD_UNAVAILABLE"
+METHOD_MARKER <- "AUTOAB_THRESHOLD_METHOD"
+
+# How the printed number was arrived at. A median of nearest-neighbour distances
+# is not a fitted estimate and must not be presented as one.
+THRESHOLD_METHOD <- "unknown"
 
 unavailable <- function(reason) {
   structure(list(reason = reason), class = "autoab_unavailable")
@@ -32,16 +37,19 @@ compute_threshold <- function(valid_dists) {
   # weak but honest estimate, rather than to a constant.
   if (length(unique(valid_dists)) < 5) {
     warning("Too few unique distance values. Using quantile-based threshold.")
+    THRESHOLD_METHOD <<- "median of nearest-neighbour distances (too few unique values to fit)"
     return(as.numeric(quantile(valid_dists, 0.5, na.rm = TRUE)))
   }
 
   if (length(valid_dists) < 20) {
     warning("Very few valid distance values. Using quantile-based threshold.")
+    THRESHOLD_METHOD <<- "median of nearest-neighbour distances (too few values to fit)"
     return(as.numeric(quantile(valid_dists, 0.5, na.rm = TRUE)))
   }
 
   if (var(valid_dists, na.rm = TRUE) < 1e-6) {
     warning("Distance values have very low variance. Using quantile-based threshold.")
+    THRESHOLD_METHOD <<- "median of nearest-neighbour distances (variance too low to fit)"
     return(as.numeric(quantile(valid_dists, 0.5, na.rm = TRUE)))
   }
 
@@ -71,6 +79,7 @@ compute_threshold <- function(valid_dists) {
     })
     if (accept(result)) {
       threshold <- result
+      THRESHOLD_METHOD <<- "kernel density estimate"
       message("Threshold method: density (deterministic)")
     }
   }
@@ -88,6 +97,7 @@ compute_threshold <- function(valid_dists) {
     })
     if (accept(result)) {
       threshold <- result
+      THRESHOLD_METHOD <<- "gamma-gamma mixture model"
       message("Threshold method: gmm gamma-gamma (spc=0.95)")
     }
   }
@@ -101,7 +111,7 @@ compute_threshold <- function(valid_dists) {
       warning(paste("GMM gamma-gamma (optimal) failed:", e$message))
       NULL
     })
-    if (accept(result)) threshold <- result
+    if (accept(result)) { threshold <- result; THRESHOLD_METHOD <<- "gamma-gamma mixture model (optimal cutoff)" }
   }
 
   # Method 3: gamma model instead of gamma-gamma (simpler model)
@@ -113,7 +123,7 @@ compute_threshold <- function(valid_dists) {
       warning(paste("GMM gamma failed:", e$message))
       NULL
     })
-    if (accept(result)) threshold <- result
+    if (accept(result)) { threshold <- result; THRESHOLD_METHOD <<- "gamma mixture model" }
   }
 
   # Method 4: density method (non-parametric)
@@ -125,12 +135,13 @@ compute_threshold <- function(valid_dists) {
       warning(paste("Density method failed:", e$message))
       NULL
     })
-    if (accept(result)) threshold <- result
+    if (accept(result)) { threshold <- result; THRESHOLD_METHOD <<- "kernel density estimate (optimal cutoff)" }
   }
 
   # Method 5: quantile-based threshold as final fallback
   if (is.null(threshold)) {
     warning("All GMM methods failed. Using quantile-based threshold.")
+    THRESHOLD_METHOD <<- "median of nearest-neighbour distances (every model fit failed)"
     threshold <- as.numeric(quantile(valid_dists, 0.5, na.rm = TRUE))
   }
 
@@ -239,5 +250,6 @@ res <- tryCatch(main(), error = function(e) {
 if (is_unavailable(res)) {
   cat(paste0(UNAVAILABLE_MARKER, "\t", res$reason, "\n"))
 } else {
+  cat(paste0(METHOD_MARKER, "\t", THRESHOLD_METHOD, "\n"))
   cat(format(as.numeric(res), digits = 10), "\n")
 }

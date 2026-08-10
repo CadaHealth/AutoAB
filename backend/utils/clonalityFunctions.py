@@ -76,6 +76,12 @@ def create_germline(db, v, d, j):
 # Emitted by backend/scripts/calculateDistribution.R when it cannot produce a
 # threshold. Keep the two in step.
 R_UNAVAILABLE_MARKER = 'AUTOAB_THRESHOLD_UNAVAILABLE'
+# The R script names the method behind the number. A median of nearest-neighbour
+# distances is not a fitted estimate and must not be presented as one.
+R_METHOD_MARKER = 'AUTOAB_THRESHOLD_METHOD'
+
+#: Method reported by the most recent findDist() call.
+last_threshold_method = None
 
 
 class ThresholdUnavailable(Exception):
@@ -171,6 +177,13 @@ def findDist(dbPath, pathToScript=None, pathToPlot=None):
             print(f"R script stderr: {result.stderr[:500]}")
 
     output_str = result.stdout or ''
+
+    global last_threshold_method
+    last_threshold_method = None
+    for line in output_str.splitlines():
+        if line.startswith(R_METHOD_MARKER):
+            _, _, method = line.partition('\t')
+            last_threshold_method = method.strip() or None
 
     # The script says so explicitly when it has nothing usable, rather than
     # emitting a placeholder number the pipeline would take at face value.

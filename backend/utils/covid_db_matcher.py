@@ -534,9 +534,27 @@ def analyze_covid_matches(
         
         # Extract V-J region
         vj_region = dna_seq[v_start:j_end]
-        
+
+        # Translate in the germline's reading frame rather than from offset 0.
+        #
+        # v_sequence_start says where the V region begins in the read;
+        # v_germline_start says which germline V position that is. A contig
+        # starting inside FR1, routine for 10x, has v_germline_start > 1, so
+        # translating from offset 0 is frame-shifted: translate_dna_to_aa stops
+        # at the first spurious stop codon and returns a short nonsense peptide.
+        # find_vh_matches buckets purely by length, so that peptide is then
+        # compared against the wrong part of the database and real matches are
+        # missed without any sign that something went wrong.
+        frame_offset = 0
+        v_germ_start = rep_seq.get('v_germline_start')
+        if pd.notna(v_germ_start):
+            try:
+                frame_offset = (int(v_germ_start) - 1) % 3
+            except (TypeError, ValueError):
+                frame_offset = 0
+
         # Translate V-J region to AA for VH matching
-        vh_aa = translate_dna_to_aa(vj_region)
+        vh_aa = translate_dna_to_aa(vj_region[frame_offset:])
         
         # Convert AIRR Junction to IMGT CDR3
         cdr3_aa = convert_airr_junction_to_imgt_cdr3(junction_aa_raw)

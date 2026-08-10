@@ -32,6 +32,23 @@ const R_DOWNLOAD_URL = process.platform === 'darwin'
     ? 'https://cran.r-project.org/bin/windows/base/'
     : 'https://cran.r-project.org/bin/linux/';
 
+
+/**
+ * The window to talk to right now, rather than the one that existed at startup.
+ *
+ * setupIpcHandlers runs once and captured `mainWindow` in a closure. On macOS
+ * the red button destroys the window while the app stays in the dock, and
+ * clicking the dock icon builds a new one; every send() then targeted a
+ * destroyed object. The pipeline ran to completion and the renderer heard
+ * nothing: no progress, no threshold request, no results, and the run
+ * deadlocked with the overlay at 0%. Dialogs kept working because they resolve
+ * the window from the event sender, which made the app look alive.
+ */
+function liveWindow(fallback: BrowserWindow | null): BrowserWindow | null {
+  if (fallback && !fallback.isDestroyed()) return fallback;
+  return BrowserWindow.getAllWindows().find(w => !w.isDestroyed()) || null;
+}
+
 export function setupIpcHandlers(
   mainWindow: BrowserWindow | null,
   backendRunner: BackendRunner,
@@ -389,22 +406,22 @@ export function setupIpcHandlers(
       // Set up event forwarding to renderer
       const onProgress = (data: any) => {
         const tagged = config.cohort_type ? { ...data, cohort_type: config.cohort_type, cohort_name: config.cohort_name } : data;
-        mainWindow?.webContents.send('pipeline:progress', tagged);
+        liveWindow(mainWindow)?.webContents.send('pipeline:progress', tagged);
       };
       
       const onLog = (data: any) => {
-        mainWindow?.webContents.send('pipeline:log', data);
+        liveWindow(mainWindow)?.webContents.send('pipeline:log', data);
       };
       
       const onResult = (data: any) => {
         const tagged = config.cohort_type ? { ...data, cohort_type: config.cohort_type, cohort_name: config.cohort_name } : data;
-        mainWindow?.webContents.send('pipeline:result', tagged);
+        liveWindow(mainWindow)?.webContents.send('pipeline:result', tagged);
       };
       
       const onThresholdRequest = (data: any) => {
         console.log('[IPC] onThresholdRequest callback called with:', data);
         const tagged = config.cohort_type ? { ...data, cohort_type: config.cohort_type, cohort_name: config.cohort_name } : data;
-        mainWindow?.webContents.send('pipeline:threshold-request', tagged);
+        liveWindow(mainWindow)?.webContents.send('pipeline:threshold-request', tagged);
         console.log('[IPC] Sent pipeline:threshold-request to renderer');
       };
       
@@ -416,7 +433,7 @@ export function setupIpcHandlers(
             const tpContent = fs.readFileSync(tpMappingPath, 'utf-8');
             const tpMapping = JSON.parse(tpContent);
             console.log('[IPC] Emitting timepoint_mapping artifact with', Object.keys(tpMapping).length, 'entries');
-            mainWindow?.webContents.send('pipeline:result', {
+            liveWindow(mainWindow)?.webContents.send('pipeline:result', {
               artifact: 'timepoint_mapping',
               data: tpMapping
             });
@@ -431,12 +448,12 @@ export function setupIpcHandlers(
           cohort_name: config.cohort_name,
           output_dir: outputDir
         };
-        mainWindow?.webContents.send('pipeline:complete', completeData);
+        liveWindow(mainWindow)?.webContents.send('pipeline:complete', completeData);
         resolve(completeData);
       };
       
       const onError = (error: Error) => {
-        mainWindow?.webContents.send('pipeline:error', { message: error.message });
+        liveWindow(mainWindow)?.webContents.send('pipeline:error', { message: error.message });
         reject(error);
       };
 
@@ -548,18 +565,18 @@ export function setupIpcHandlers(
       // Set up event forwarding
       const onResult = (data: any) => {
         console.log('[IPC] Public clone result:', data);
-        mainWindow?.webContents.send('pipeline:publicCloneResult', data);
+        liveWindow(mainWindow)?.webContents.send('pipeline:publicCloneResult', data);
       };
       
       const onComplete = (data: any) => {
         console.log('[IPC] Public clone analysis complete');
-        mainWindow?.webContents.send('pipeline:publicCloneComplete', data);
+        liveWindow(mainWindow)?.webContents.send('pipeline:publicCloneComplete', data);
         resolve(data);
       };
       
       const onError = (error: string) => {
         console.error('[IPC] Public clone analysis error:', error);
-        mainWindow?.webContents.send('pipeline:publicCloneError', error);
+        liveWindow(mainWindow)?.webContents.send('pipeline:publicCloneError', error);
         reject(new Error(error));
       };
       
@@ -574,18 +591,18 @@ export function setupIpcHandlers(
     return new Promise((resolve, reject) => {
       const onResult = (data: any) => {
         console.log('[IPC] COVID matching result:', data);
-        mainWindow?.webContents.send('pipeline:covidMatchResult', data);
+        liveWindow(mainWindow)?.webContents.send('pipeline:covidMatchResult', data);
       };
 
       const onComplete = (data: any) => {
         console.log('[IPC] COVID matching analysis complete');
-        mainWindow?.webContents.send('pipeline:covidMatchComplete', data);
+        liveWindow(mainWindow)?.webContents.send('pipeline:covidMatchComplete', data);
         resolve(data);
       };
 
       const onError = (error: string) => {
         console.error('[IPC] COVID matching analysis error:', error);
-        mainWindow?.webContents.send('pipeline:covidMatchError', error);
+        liveWindow(mainWindow)?.webContents.send('pipeline:covidMatchError', error);
         reject(new Error(error));
       };
 

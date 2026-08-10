@@ -191,9 +191,14 @@ build_single_tree <- function(fasta_file) {
                 # GTR+G model for DNA evolution with gamma-distributed rates
                 # -B 1000: Ultrafast bootstrap (fast, reliable)
                 # -redo: Force overwrite
+                # shQuote because this is a shell string and the path contains
+                # the timepoint label, which is free text the user typed. A
+                # label as ordinary as "Day 0" split the -s argument, IQ-TREE
+                # exited, and every tree for that timepoint quietly became
+                # neighbour-joining while the summary blamed a missing IQ-TREE.
                 iqtree_cmd_full <- paste(
-                    iqtree_cmd,
-                    "-s", temp_fasta,
+                    shQuote(iqtree_cmd),
+                    "-s", shQuote(temp_fasta),
                     "-m GTR+G",
                     "-B 1000",
                     "-redo",

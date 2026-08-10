@@ -15,6 +15,8 @@
   export let timepointThresholds: {
     label: string;
     calculated?: number | null;
+    /** How the number was arrived at; a median fallback is not a fitted estimate. */
+    method?: string | null;
     error?: string;
     detail?: string;
   }[] = [];
@@ -170,6 +172,7 @@
               <span class="tp-cell tp-calc-cell tp-value" class:tp-unavailable={tp.calculated == null}>
                 {#if tp.calculated != null}
                   {tp.calculated.toFixed(4)}
+                  {#if tp.method}<span class="tp-method">{tp.method}</span>{/if}
                 {:else}
                   <span title={tp.detail || ''}>{tp.error || 'not available'}</span>
                 {/if}
@@ -248,6 +251,9 @@
         <div class="calculated-value">
           {globalEntry?.calculated != null ? globalEntry.calculated.toFixed(4) : calculatedValue.toFixed(4)}
         </div>
+        {#if globalEntry?.method}
+          <div class="method-note">{globalEntry.method}</div>
+        {/if}
 
         {#if singlePlot}
           <div class="single-plot-container">
@@ -422,6 +428,21 @@
     font-size: var(--text-sm);
     color: var(--color-primary);
     font-weight: var(--font-semibold);
+  }
+
+  .tp-method {
+    display: block;
+    font-size: 10.5px;
+    color: #64748b;
+    font-weight: 400;
+    margin-top: 2px;
+  }
+
+  .method-note {
+    text-align: center;
+    font-size: 12px;
+    color: #64748b;
+    margin: -8px 0 14px;
   }
 
   .unavailable-notice {

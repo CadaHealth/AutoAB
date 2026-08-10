@@ -55,6 +55,7 @@ export function setupIpcHandlers(
     return checkDependencies({
       pythonPath: paths.pythonPath,
       binDir: paths.binDir,
+      dataDir: paths.dataDir,
       pythonIsBundled: paths.pythonIsBundled,
     });
   });

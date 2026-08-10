@@ -44,8 +44,40 @@ export interface DependencyReport {
 export interface DependencyCheckInput {
   pythonPath: string;
   binDir: string;
+  /** Reference databases; checked for whitespace, which BLAST+ cannot handle. */
+  dataDir?: string;
   /** True when the interpreter came from the app bundle rather than the system. */
   pythonIsBundled: boolean;
+}
+
+/**
+ * Whether the app is sitting somewhere BLAST+ cannot work from.
+ *
+ * BLAST re-parses its own arguments and splits on whitespace, so every path it
+ * is handed must be free of spaces. That includes the reference databases
+ * inside the bundle, which means the location of the .app itself matters. Run
+ * straight from a mounted disk image the path is "/Volumes/Clono 1.0.0/…" and
+ * every alignment fails, while `igblastn -version` still answers happily
+ * because it is given no paths.
+ */
+function checkAppLocation(input: DependencyCheckInput): DependencyItem | null {
+  const offending = [input.binDir, input.dataDir].filter(p => p && /\s/.test(p)) as string[];
+  if (offending.length === 0) return null;
+
+  const fromDiskImage = offending.some(p => p.startsWith('/Volumes/'));
+  return {
+    id: 'app-location',
+    label: 'Application location',
+    status: 'error',
+    required: true,
+    problem: fromDiskImage
+      ? 'AutoAB is running from the disk image. The aligner cannot read files from a path '
+        + 'containing spaces, so no analysis will work. Drag AutoAB to your Applications '
+        + 'folder, eject the disk image, and open it from there.'
+      : 'AutoAB is in a folder whose path contains a space. The aligner cannot read files '
+        + 'from such a path. Move AutoAB to your Applications folder and open it from there.',
+    detail: offending[0],
+  };
 }
 
 const RUN_TIMEOUT_MS = 20000;
@@ -383,6 +415,11 @@ export async function checkDependencies(input: DependencyCheckInput): Promise<De
   ]);
 
   const items: DependencyItem[] = [python, ...igblast, ...r, iqtree];
+
+  // Location first: when it is wrong nothing else matters, and the other rows
+  // would otherwise report a green IgBLAST that cannot actually align anything.
+  const location = checkAppLocation(input);
+  if (location) items.unshift(location);
 
   return {
     ok: items.every(i => !i.required || i.status === 'ok'),

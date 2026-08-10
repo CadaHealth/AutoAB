@@ -4,8 +4,20 @@
   /** Single-value mode (legacy/single-cohort) */
   export let calculatedValue: number = 0;
 
-  /** Multi-timepoint mode: array of {label, calculated} */
-  export let timepointThresholds: { label: string; calculated: number }[] = [];
+  /**
+   * Multi-timepoint mode.
+   *
+   * `calculated` is absent when the backend could not estimate a threshold, and
+   * `error` then says why. Those entries used to crash this component on
+   * `calculated.toFixed()`; since the dialog never rendered, the pipeline waited
+   * for a response that could not arrive and the run hung indefinitely.
+   */
+  export let timepointThresholds: {
+    label: string;
+    calculated?: number | null;
+    error?: string;
+    detail?: string;
+  }[] = [];
 
   /** Optional cohort label shown in the dialog title when running multi-cohort */
   export let cohortLabel: string = '';
@@ -20,19 +32,38 @@
   // Determine mode
   $: isMulti = timepointThresholds.length > 0 && timepointThresholds[0]?.label !== '_global';
 
-  // Single-value state
-  let singleInput = calculatedValue.toFixed(4);
+  /** The single-cohort entry, which the backend still sends as a one-item list. */
+  $: globalEntry = timepointThresholds.find(tp => tp.label === '_global');
 
-  // Multi-value state: one input per timepoint
+  /**
+   * Single mode with no estimate must not prefill anything. It previously fell
+   * back to 0, which passes the 0..1 validation and would put every sequence in
+   * its own clone.
+   */
+  $: singleUnavailable = !isMulti && !!globalEntry && globalEntry.calculated == null;
+  $: singleReason = globalEntry?.error || '';
+
+  // Single-value state
+  let singleInput = calculatedValue > 0 ? calculatedValue.toFixed(4) : '';
+  let singlePrefilled = false;
+  $: if (!singlePrefilled && !isMulti && globalEntry?.calculated != null) {
+    singleInput = globalEntry.calculated.toFixed(4);
+    singlePrefilled = true;
+  }
+
+  // Multi-value state: one input per timepoint. Entries the backend could not
+  // estimate are left blank so the user has to enter one deliberately.
   let tpInputs: Record<string, string> = {};
   $: {
     if (isMulti && Object.keys(tpInputs).length === 0) {
       for (const tp of timepointThresholds) {
-        tpInputs[tp.label] = tp.calculated.toFixed(4);
+        tpInputs[tp.label] = tp.calculated != null ? tp.calculated.toFixed(4) : '';
       }
       tpInputs = { ...tpInputs };
     }
   }
+
+  $: unavailableLabels = timepointThresholds.filter(tp => tp.calculated == null).map(tp => tp.label);
 
   // Which plot is expanded (null = none)
   let expandedPlot: string | null = null;
@@ -58,8 +89,8 @@
 
       if (applyToAll) {
         const parsed = parseFloat(applyAllValue);
-        if (isNaN(parsed) || parsed < 0 || parsed > 1) {
-          error = 'Please enter a valid number between 0 and 1';
+        if (isNaN(parsed) || parsed <= 0 || parsed > 1) {
+          error = 'Please enter a value greater than 0 and at most 1';
           return;
         }
         for (const tp of timepointThresholds) {
@@ -67,9 +98,16 @@
         }
       } else {
         for (const tp of timepointThresholds) {
-          const parsed = parseFloat(tpInputs[tp.label] || '');
-          if (isNaN(parsed) || parsed < 0 || parsed > 1) {
-            error = `Invalid value for ${tp.label}: must be between 0 and 1`;
+          const raw = (tpInputs[tp.label] || '').trim();
+          if (!raw && tp.calculated == null) {
+            error = `${tp.label} has no estimated threshold, so a value has to be entered for it.`;
+            return;
+          }
+          const parsed = parseFloat(raw);
+          // A threshold of 0 puts every sequence in its own clone, so it is
+          // rejected rather than quietly accepted.
+          if (isNaN(parsed) || parsed <= 0 || parsed > 1) {
+            error = `Invalid value for ${tp.label}: must be greater than 0 and at most 1`;
             return;
           }
           thresholds[tp.label] = parsed;
@@ -79,8 +117,10 @@
       dispatch('confirm', thresholds);
     } else {
       const parsed = parseFloat(singleInput);
-      if (isNaN(parsed) || parsed < 0 || parsed > 1) {
-        error = 'Please enter a valid number between 0 and 1';
+      if (isNaN(parsed) || parsed <= 0 || parsed > 1) {
+        error = singleUnavailable
+          ? 'No threshold could be estimated, so enter one between 0 and 1 to continue.'
+          : 'Please enter a value greater than 0 and at most 1';
         return;
       }
       dispatch('confirm', parsed);
@@ -107,6 +147,14 @@
           Calculated thresholds per timepoint{cohortLabel ? ` for ${cohortLabel}` : ''} for clone definition:
         </p>
 
+        {#if unavailableLabels.length}
+          <div class="unavailable-notice">
+            No threshold could be estimated for {unavailableLabels.join(', ')}.
+            Enter a value for {unavailableLabels.length === 1 ? 'it' : 'each of them'} to continue,
+            or cancel the run. The reason is shown in the table.
+          </div>
+        {/if}
+
         <div class="tp-table">
           <div class="tp-row tp-header-row">
             <span class="tp-cell tp-label-cell">Timepoint</span>
@@ -119,13 +167,20 @@
           {#each timepointThresholds as tp (tp.label)}
             <div class="tp-row">
               <span class="tp-cell tp-label-cell tp-name">{tp.label}</span>
-              <span class="tp-cell tp-calc-cell tp-value">{tp.calculated.toFixed(4)}</span>
+              <span class="tp-cell tp-calc-cell tp-value" class:tp-unavailable={tp.calculated == null}>
+                {#if tp.calculated != null}
+                  {tp.calculated.toFixed(4)}
+                {:else}
+                  <span title={tp.detail || ''}>{tp.error || 'not available'}</span>
+                {/if}
+              </span>
               <span class="tp-cell tp-input-cell">
                 <input
                   type="text"
                   class="tp-input"
+                  class:needed={tp.calculated == null}
                   bind:value={tpInputs[tp.label]}
-                  placeholder={tp.calculated.toFixed(4)}
+                  placeholder={tp.calculated != null ? tp.calculated.toFixed(4) : 'enter a value'}
                   disabled={applyToAll}
                 />
               </span>
@@ -172,12 +227,26 @@
             />
           {/if}
         </label>
+      {:else if singleUnavailable}
+        <p class="calculated-info">
+          No threshold could be estimated{cohortLabel ? ` for ${cohortLabel}` : ''}:
+        </p>
+        <div class="unavailable-notice">
+          {singleReason || 'The estimation did not produce a usable value.'}
+          {#if globalEntry?.detail}
+            <div class="unavailable-detail">{globalEntry.detail}</div>
+          {/if}
+        </div>
+        <p class="calculated-info">
+          Enter a threshold between 0 and 1 to continue, or cancel the run. Clones are
+          defined by this value, so a guess changes the result.
+        </p>
       {:else}
         <p class="calculated-info">
           The calculated optimal threshold{cohortLabel ? ` for ${cohortLabel}` : ''} for clone definition is:
         </p>
         <div class="calculated-value">
-          {calculatedValue.toFixed(4)}
+          {globalEntry?.calculated != null ? globalEntry.calculated.toFixed(4) : calculatedValue.toFixed(4)}
         </div>
 
         {#if singlePlot}
@@ -353,6 +422,36 @@
     font-size: var(--text-sm);
     color: var(--color-primary);
     font-weight: var(--font-semibold);
+  }
+
+  .unavailable-notice {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #9a3412;
+  }
+
+  .unavailable-detail {
+    margin-top: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: #b45309;
+    word-break: break-word;
+  }
+
+  .tp-unavailable {
+    color: #9a3412;
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  .tp-input.needed {
+    border-color: #fb923c;
+    background: #fffbeb;
   }
 
   .tp-input {

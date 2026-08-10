@@ -112,25 +112,33 @@ function exactMWU(U: number, n1: number, n2: number): number {
   // dp_prev[j][s] = ways to pick j items from ranks 1..i with sum s
   // We only need the current number-of-items layer
 
-  // Simpler approach for small N: enumerate subsets
-  // For N <= 20 this is fine via DP
-  const dp: number[][] = Array.from({ length: n1 + 1 }, () => new Array(range + 1).fill(0));
-  dp[0][0] = 1; // 0 items chosen, sum = minR → offset 0
+  // dp[k][r] = number of ways to choose k of the ranks 1..N with rank sum
+  // exactly r. The index is the ABSOLUTE sum, not an offset from minR.
+  //
+  // It was previously indexed as an offset while being filled with absolute
+  // sums, and the rows were only `range + 1` long, so every subset whose sum
+  // exceeded that was dropped while the division still used the full binomial.
+  // For n1 = n2 = 5 the table covered sums 0..25 while the real ones run 15..40,
+  // discarding roughly half the distribution: perfect separation returned
+  // p = 0.0714 instead of 0.0079, and no design with six or fewer per group
+  // could ever fall below 0.05.
+  const dp: number[][] = Array.from({ length: n1 + 1 }, () => new Array(maxR + 1).fill(0));
+  dp[0][0] = 1;
 
   for (let rank = 1; rank <= N; rank++) {
-    // Iterate backwards to avoid double-counting
+    // Iterate k and the sum backwards so each rank is used at most once.
     for (let k = Math.min(n1, rank); k >= 1; k--) {
-      for (let s = range; s >= rank; s--) {
-        dp[k][s] += dp[k - 1][s - rank];
+      for (let r = maxR; r >= rank; r--) {
+        dp[k][r] += dp[k - 1][r - rank];
       }
     }
   }
 
-  // Now dp[n1][s] = number of subsets of size n1 with rank sum = minR + s
-  for (let s = 0; s <= range; s++) {
-    const U1 = (minR + s) - minR; // = s, since U1 = R1 - n1*(n1+1)/2
+  // U1 = R1 - n1(n1+1)/2, so a rank sum of r corresponds to U1 = r - minR.
+  for (let r = minR; r <= maxR; r++) {
+    const U1 = r - minR;
     if (U1 <= target || U1 >= n1 * n2 - target) {
-      countExtreme += dp[n1][s];
+      countExtreme += dp[n1][r];
     }
   }
 

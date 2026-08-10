@@ -83,18 +83,41 @@ function hasWhitespace(p: string): boolean {
  * .gitignore already covers them there. Once packaged that location is inside
  * the read-only bundle, where makeblastdb failed for every database.
  */
+/**
+ * Create a directory, falling back to a temporary one rather than throwing.
+ *
+ * These run during startup, before a window exists. An unguarded mkdirSync in
+ * ~/Documents took the whole launch down when macOS denied the folder-access
+ * prompt: no window, no message, nothing to click.
+ */
+function ensureDir(preferred: string, fallbackName: string): string {
+  try {
+    fs.mkdirSync(preferred, { recursive: true });
+    fs.accessSync(preferred, fs.constants.W_OK);
+    return preferred;
+  } catch (e) {
+    const fallback = path.join(os.tmpdir(), fallbackName);
+    console.warn(`[Main] Cannot use ${preferred} (${e}); falling back to ${fallback}`);
+    try {
+      fs.mkdirSync(fallback, { recursive: true });
+    } catch (inner) {
+      console.error('[Main] Fallback directory also unusable:', inner);
+    }
+    return fallback;
+  }
+}
+
 function getCachePath(): string {
   // ~/Library/Caches has no space in it, unlike userData's parent.
   // Electron has no 'cache' path name, so build it from home.
-  let dir = isDev
+  const preferred = isDev
     ? getDataPath()
     : process.platform === 'darwin'
       ? path.join(app.getPath('home'), 'Library', 'Caches', 'com.bcr-analysis.app')
       : path.join(app.getPath('userData'), 'cache');
 
-  if (hasWhitespace(dir)) dir = path.join(os.tmpdir(), 'autoab-cache');
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  if (hasWhitespace(preferred)) return ensureDir(path.join(os.tmpdir(), 'autoab-cache'), 'autoab-cache');
+  return ensureDir(preferred, 'autoab-cache');
 }
 
 /**
@@ -110,13 +133,12 @@ function getCachePath(): string {
  * are something the user should be able to find.
  */
 function getOutsPath(): string {
-  let dir = isDev
+  const preferred = isDev
     ? path.join(getResourcesPath(), '..', 'geneGUI', 'outs')
     : path.join(app.getPath('home'), 'Documents', 'AutoAB');
 
-  if (hasWhitespace(dir)) dir = path.join(os.tmpdir(), 'autoab-runs');
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  if (hasWhitespace(preferred)) return ensureDir(path.join(os.tmpdir(), 'autoab-runs'), 'autoab-runs');
+  return ensureDir(preferred, 'autoab-runs');
 }
 
 function createWindow(): void {

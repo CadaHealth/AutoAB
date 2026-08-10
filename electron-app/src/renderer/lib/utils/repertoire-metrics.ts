@@ -109,11 +109,23 @@ function shadeColorForTimepoint(baseHex: string, order: number, maxOrder: number
   return `#${toHex(nr)}${toHex(ng)}${toHex(nb)}`;
 }
 
-/** Build a map of clone_id → count of sequences in that clone. */
+/**
+ * Build a map of clone_id → count of sequences in that clone.
+ *
+ * Sequences without a clone_id are excluded rather than pooled. Only heavy
+ * chains reach DefineClones, so for 10x and BD Rhapsody input the light chains,
+ * roughly half the contigs, carry no clone_id. Collapsing them under a single
+ * sentinel id turned them into one enormous pseudo-clone that then dominated
+ * Shannon, Simpson, Gini, D50, Chao1, the rank-abundance curve and
+ * top1CloneFraction, which read close to 0.5 on the dashboard for what is not a
+ * clone at all. The public-clone and cross-cohort code already filters them
+ * out, so the views disagreed with each other.
+ */
 function cloneSizeMap(seqs: SequenceData[]): Map<number, number> {
   const m = new Map<number, number>();
   for (const s of seqs) {
-    const cid = s.clone_id ?? -1;
+    const cid = s.clone_id;
+    if (cid === null || cid === undefined) continue;
     m.set(cid, (m.get(cid) ?? 0) + 1);
   }
   return m;

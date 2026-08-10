@@ -2109,10 +2109,22 @@ class PipelineRunner:
                                 mismatches += 1
                         shm_count = mismatches
 
+                    # AIRR's own verdict, not an assumption. MakeDb.py runs with
+                    # --failed so non-productive rearrangements are present in
+                    # this table too; hardcoding True labelled every one of them
+                    # productive in the results the user reads and exports.
+                    productive_raw = row.get('productive')
+                    if isinstance(productive_raw, str):
+                        is_productive = productive_raw.strip().upper() in ('T', 'TRUE', '1', 'YES')
+                    elif pd.isna(productive_raw):
+                        is_productive = False
+                    else:
+                        is_productive = bool(productive_raw)
+
                     clone_data[seq_id] = {
                         'clone_id': int(clone_id) if clone_id is not None else None,
                         'clone_count': len(clone_df[clone_df['clone_id'] == clone_id]) if clone_id is not None else 0,
-                        'productive': True,
+                        'productive': is_productive,
                         'cdr3_dna': junction,
                         'cdr3_peptide': junction_aa,
                         'dna_sequence': dna_seq,

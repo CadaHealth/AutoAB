@@ -165,10 +165,56 @@ async function checkPython(input: DependencyCheckInput): Promise<DependencyItem>
  * bundled binary runs through Rosetta 2. A missing Rosetta shows up as
  * "Bad CPU type in executable", which is worth translating.
  */
+/**
+ * Rosetta 2, listed in its own right on Apple Silicon.
+ *
+ * It is a real requirement there, not an implementation detail: NCBI publishes
+ * IgBLAST for macOS as x86_64 only, and Apple Silicon Macs do not ship with
+ * Rosetta. Showing it only when broken meant the screen never admitted the
+ * dependency existed, and a user could not confirm it was satisfied.
+ *
+ * `igblastWorks` is the authoritative signal, since running the Intel binary is
+ * exactly what Rosetta is needed for. The oahd check is the fallback for when
+ * IgBLAST could not be consulted at all.
+ */
+function rosettaItem(igblastWorks: boolean | null): DependencyItem | null {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return null;
+
+  const installed = igblastWorks !== null
+    ? igblastWorks
+    : fs.existsSync('/usr/libexec/rosetta/oahd');
+
+  if (installed) {
+    return {
+      id: 'rosetta',
+      label: 'Rosetta 2',
+      status: 'ok',
+      required: true,
+      detail: 'Installed. Needed because IgBLAST is published for Intel only.',
+    };
+  }
+
+  return {
+    id: 'rosetta',
+    label: 'Rosetta 2',
+    status: 'missing',
+    required: true,
+    problem:
+      'IgBLAST is only published as an Intel program, so Apple Silicon Macs need Rosetta 2 to run it. '
+      + 'AutoAB can install it for you; macOS will ask for your password.',
+    fix: 'install-rosetta',
+  };
+}
+
 async function checkIgblast(input: DependencyCheckInput): Promise<DependencyItem[]> {
   const exe = process.platform === 'win32' ? 'igblastn.exe' : 'igblastn';
   const bin = path.join(input.binDir, exe);
   const items: DependencyItem[] = [];
+  const withRosetta = (igblastWorks: boolean | null) => {
+    const r = rosettaItem(igblastWorks);
+    if (r) items.push(r);
+    return items;
+  };
 
   if (!fs.existsSync(bin)) {
     items.push({
@@ -179,14 +225,12 @@ async function checkIgblast(input: DependencyCheckInput): Promise<DependencyItem
       problem: 'The IgBLAST aligner is missing from the application bundle. Reinstalling AutoAB should restore it.',
       detail: `Expected at ${bin}`,
     });
-    return items;
+    return withRosetta(null);
   }
 
   const res = await tryRun(bin, ['-version']);
   const combined = `${res.stdout}${res.stderr}`;
   const badCpu = /bad cpu type|Exec format error/i.test(combined) || res.code === 'ENOEXEC';
-
-  const needsRosetta = process.platform === 'darwin' && process.arch === 'arm64';
 
   if (badCpu) {
     items.push({
@@ -197,19 +241,7 @@ async function checkIgblast(input: DependencyCheckInput): Promise<DependencyItem
       problem: 'IgBLAST could not run on this Mac.',
       detail: firstLine(combined),
     });
-    if (needsRosetta) {
-      items.push({
-        id: 'rosetta',
-        label: 'Rosetta 2',
-        status: 'missing',
-        required: true,
-        problem:
-          'IgBLAST is only published as an Intel program, so Apple Silicon Macs need Rosetta 2 to run it. '
-          + 'AutoAB can install it for you; macOS will ask for your password.',
-        fix: 'install-rosetta',
-      });
-    }
-    return items;
+    return withRosetta(false);
   }
 
   if (!res.ok && !firstLine(combined)) {
@@ -221,7 +253,7 @@ async function checkIgblast(input: DependencyCheckInput): Promise<DependencyItem
       problem: 'IgBLAST is present but did not respond.',
       detail: `exit ${res.code}`,
     });
-    return items;
+    return withRosetta(null);
   }
 
   items.push({
@@ -229,9 +261,9 @@ async function checkIgblast(input: DependencyCheckInput): Promise<DependencyItem
     label: 'IgBLAST',
     status: 'ok',
     required: true,
-    detail: firstLine(combined) + (needsRosetta ? ' (Intel build, via Rosetta 2)' : ''),
+    detail: firstLine(combined),
   });
-  return items;
+  return withRosetta(true);
 }
 
 /** Locate Rscript the same way the Python backend does, so both agree. */

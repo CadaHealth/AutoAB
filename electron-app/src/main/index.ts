@@ -180,6 +180,35 @@ function createWindow(): void {
 }
 
 /**
+ * Put the usual command-line locations back on PATH.
+ *
+ * An app launched from Finder inherits launchd's PATH, which is
+ * /usr/bin:/bin:/usr/sbin:/sbin and nothing else. It never sees the user's
+ * shell profile. R installs to /usr/local/bin, so without this the app reports
+ * "R is not installed" to everyone who has a perfectly good CRAN install, and
+ * offers to download it again. Launching from a terminal hides the problem
+ * entirely, which is why it survived testing.
+ */
+function augmentProcessPath(): void {
+  if (process.platform === 'win32') return;
+
+  const extras = [
+    '/usr/local/bin',                                  // CRAN R, and most installers
+    '/opt/homebrew/bin',                               // Homebrew on Apple Silicon
+    '/opt/local/bin',                                  // MacPorts
+    '/Library/Frameworks/R.framework/Resources/bin',   // R.framework directly
+    path.join(os.homedir(), '.local', 'bin'),
+  ];
+
+  const current = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const missing = extras.filter(p => !current.includes(p) && fs.existsSync(p));
+  if (missing.length) {
+    process.env.PATH = [...current, ...missing].join(path.delimiter);
+    console.log('[Main] Added to PATH:', missing.join(', '));
+  }
+}
+
+/**
  * The interpreter that ships inside the app, built by scripts/bundle-python.sh.
  *
  * Packaged, it lands at Resources/python. Unpackaged it sits per-architecture
@@ -266,6 +295,10 @@ function initBackendRunner(): void {
 
 // App lifecycle
 app.whenReady().then(() => {
+  // Before anything looks for R or Python: a Finder launch starts with
+  // launchd's bare PATH.
+  augmentProcessPath();
+
   initBackendRunner();
   
   // Create window first

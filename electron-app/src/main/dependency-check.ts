@@ -6,9 +6,12 @@
  * where possible, offers to fix it without sending the user to a terminal.
  */
 
-import { spawn, spawnSync } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 /** R packages the pipeline's scripts load. Keep in sync with backend/scripts/*.R. */
 export const REQUIRED_R_PACKAGES = ['alakazam', 'shazam', 'ape', 'jsonlite'];
@@ -45,7 +48,39 @@ export interface DependencyCheckInput {
   pythonIsBundled: boolean;
 }
 
-const RUN_OPTS = { encoding: 'utf-8' as const, timeout: 20000 };
+const RUN_TIMEOUT_MS = 20000;
+
+interface RunResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  /** Exit status, or a libuv error string such as 'ENOENT' when it never ran. */
+  code: number | string | null;
+}
+
+/**
+ * Run a probe without blocking the main process.
+ *
+ * These checks spawn Python, IgBLAST and R, and R alone takes about a second to
+ * start, twice. Done synchronously that freezes Electron long enough for macOS
+ * to show the spinning beachball, which reads as a hung application.
+ */
+async function tryRun(command: string, args: string[]): Promise<RunResult> {
+  try {
+    const { stdout, stderr } = await execFileAsync(command, args, {
+      timeout: RUN_TIMEOUT_MS,
+      encoding: 'utf-8',
+    });
+    return { ok: true, stdout: stdout || '', stderr: stderr || '', code: 0 };
+  } catch (e: any) {
+    return {
+      ok: false,
+      stdout: e?.stdout || '',
+      stderr: e?.stderr || '',
+      code: e?.code ?? null,
+    };
+  }
+}
 
 function firstLine(s: string | null | undefined): string {
   return (s || '').split(/\r?\n/).find(l => l.trim())?.trim() || '';
@@ -58,21 +93,26 @@ function firstLine(s: string | null | undefined): string {
  * runtime, or a system Python that lost changeo to an OS upgrade, both present
  * as a perfectly good interpreter.
  */
-function checkPython(input: DependencyCheckInput): DependencyItem {
+async function checkPython(input: DependencyCheckInput): Promise<DependencyItem> {
+  // find_spec rather than __import__: importing scipy, pandas and matplotlib
+  // for real costs several seconds, and this only needs to know whether they
+  // are installed. A present-but-broken module still surfaces when the
+  // pipeline runs, with a better error than this screen could give.
   const probe = [
-    'import sys, json',
+    'import sys, json, importlib.util',
     'mods = ["Bio","pandas","numpy","matplotlib","scipy","airr","changeo","presto"]',
     'missing = []',
     'for m in mods:',
-    '    try: __import__(m)',
+    '    try:',
+    '        if importlib.util.find_spec(m) is None: missing.append(m)',
     '    except Exception: missing.append(m)',
     'print(json.dumps({"version": sys.version.split()[0], "missing": missing}))',
   ].join('\n');
 
-  const res = spawnSync(input.pythonPath, ['-c', probe], RUN_OPTS);
+  const res = await tryRun(input.pythonPath, ['-c', probe]);
   const label = input.pythonIsBundled ? 'Python (built in)' : 'Python';
 
-  if (res.error || res.status !== 0) {
+  if (!res.ok) {
     return {
       id: 'python',
       label,
@@ -81,7 +121,7 @@ function checkPython(input: DependencyCheckInput): DependencyItem {
       problem: input.pythonIsBundled
         ? 'The built-in Python runtime could not be started. The app may be damaged; reinstalling it should fix this.'
         : 'No Python with the analysis packages could be found.',
-      detail: firstLine(res.stderr) || String(res.error || ''),
+      detail: firstLine(res.stderr) || `exit ${res.code}`,
     };
   }
 
@@ -125,7 +165,7 @@ function checkPython(input: DependencyCheckInput): DependencyItem {
  * bundled binary runs through Rosetta 2. A missing Rosetta shows up as
  * "Bad CPU type in executable", which is worth translating.
  */
-function checkIgblast(input: DependencyCheckInput): DependencyItem[] {
+async function checkIgblast(input: DependencyCheckInput): Promise<DependencyItem[]> {
   const exe = process.platform === 'win32' ? 'igblastn.exe' : 'igblastn';
   const bin = path.join(input.binDir, exe);
   const items: DependencyItem[] = [];
@@ -142,10 +182,9 @@ function checkIgblast(input: DependencyCheckInput): DependencyItem[] {
     return items;
   }
 
-  const res = spawnSync(bin, ['-version'], RUN_OPTS);
-  const combined = `${res.stdout || ''}${res.stderr || ''}`;
-  const badCpu = /bad cpu type|Exec format error/i.test(combined)
-    || (res.error as NodeJS.ErrnoException | undefined)?.code === 'ENOEXEC';
+  const res = await tryRun(bin, ['-version']);
+  const combined = `${res.stdout}${res.stderr}`;
+  const badCpu = /bad cpu type|Exec format error/i.test(combined) || res.code === 'ENOEXEC';
 
   const needsRosetta = process.platform === 'darwin' && process.arch === 'arm64';
 
@@ -173,14 +212,14 @@ function checkIgblast(input: DependencyCheckInput): DependencyItem[] {
     return items;
   }
 
-  if (res.status !== 0 && !firstLine(combined)) {
+  if (!res.ok && !firstLine(combined)) {
     items.push({
       id: 'igblast',
       label: 'IgBLAST',
       status: 'error',
       required: true,
       problem: 'IgBLAST is present but did not respond.',
-      detail: firstLine(combined) || String(res.error || ''),
+      detail: `exit ${res.code}`,
     });
     return items;
   }
@@ -202,11 +241,22 @@ export function resolveRscript(): string {
   return process.platform === 'win32' ? 'Rscript.exe' : 'Rscript';
 }
 
-function checkR(): DependencyItem[] {
+async function checkR(): Promise<DependencyItem[]> {
   const rscript = resolveRscript();
-  const res = spawnSync(rscript, ['--version'], RUN_OPTS);
 
-  if (res.error || res.status !== 0) {
+  // One R invocation for both the version and the package list. R takes about
+  // a second to start, so asking twice doubles the wait for no reason.
+  // find.package() locates without loading, which matters because loading
+  // alakazam drags in the whole Bioconductor subtree.
+  const probe = [
+    `cat(R.version.string, "\\n")`,
+    `pkgs <- c(${REQUIRED_R_PACKAGES.map(p => `"${p}"`).join(', ')})`,
+    `cat(paste(pkgs[!sapply(pkgs, function(p) length(find.package(p, quiet = TRUE)) > 0)], collapse = " "), "\\n")`,
+  ].join('; ');
+
+  const res = await tryRun(rscript, ['-e', probe]);
+
+  if (!res.ok) {
     return [{
       id: 'r',
       label: 'R',
@@ -219,13 +269,10 @@ function checkR(): DependencyItem[] {
     }];
   }
 
-  // R prints its banner to stdout on modern versions and stderr on older ones.
-  const version = firstLine(res.stdout) || firstLine(res.stderr);
-
-  const pkgProbe = `cat(paste(sapply(c(${REQUIRED_R_PACKAGES.map(p => `"${p}"`).join(',')}),`
-    + ` function(p) if (requireNamespace(p, quietly=TRUE)) "" else p), collapse=" "))`;
-  const pkgRes = spawnSync(rscript, ['-e', pkgProbe], RUN_OPTS);
-  const missing = (pkgRes.stdout || '').trim().split(/\s+/).filter(Boolean);
+  // Line 1 is the version banner, line 2 the packages that could not be found.
+  const lines = res.stdout.split(/\r?\n/);
+  const version = (lines[0] || '').trim() || firstLine(res.stderr);
+  const missing = (lines[1] || '').trim().split(/\s+/).filter(Boolean);
 
   const items: DependencyItem[] = [{
     id: 'r',
@@ -255,12 +302,16 @@ function checkR(): DependencyItem[] {
   return items;
 }
 
-export function checkDependencies(input: DependencyCheckInput): DependencyReport {
-  const items: DependencyItem[] = [
+export async function checkDependencies(input: DependencyCheckInput): Promise<DependencyReport> {
+  // Run the three groups concurrently: they are independent, and R alone is
+  // slow enough that doing them in sequence is noticeable.
+  const [python, igblast, r] = await Promise.all([
     checkPython(input),
-    ...checkIgblast(input),
-    ...checkR(),
-  ];
+    checkIgblast(input),
+    checkR(),
+  ]);
+
+  const items: DependencyItem[] = [python, ...igblast, ...r];
 
   return {
     ok: items.every(i => !i.required || i.status === 'ok'),
@@ -292,18 +343,28 @@ export function runFix(
   } else if (fix === 'install-r-packages') {
     // Install into the user library so no administrator rights are needed;
     // R does not create that directory on its own when running non-interactively.
+    //
+    // alakazam and shazam depend on Biostrings, GenomicAlignments and IRanges,
+    // which live on Bioconductor rather than CRAN. Installing straight from
+    // CRAN therefore fails on the dependency, so this goes through BiocManager,
+    // which knows both repositories and matches the Bioconductor release to the
+    // installed R version.
     const rCode = [
       'lib <- Sys.getenv("R_LIBS_USER")',
       'if (!nzchar(lib) || lib == "NULL") lib <- file.path(path.expand("~"), "R", "autoab-library")',
       'dir.create(lib, recursive = TRUE, showWarnings = FALSE)',
       '.libPaths(c(lib, .libPaths()))',
+      'options(repos = c(CRAN = "https://cloud.r-project.org"))',
       `pkgs <- c(${REQUIRED_R_PACKAGES.map(p => `"${p}"`).join(', ')})`,
       'need <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]',
-      'if (length(need)) install.packages(need, lib = lib, repos = "https://cloud.r-project.org")',
+      'if (length(need)) {',
+      '  if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager", lib = lib)',
+      '  BiocManager::install(need, lib = lib, ask = FALSE, update = FALSE)',
+      '}',
       'still <- pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]',
       'if (length(still)) { cat("FAILED:", paste(still, collapse=" "), "\\n"); quit(status = 1) }',
       'cat("All packages installed into", lib, "\\n")',
-    ].join('; ');
+    ].join('\n');
     command = resolveRscript();
     args = ['-e', rCode];
   } else {

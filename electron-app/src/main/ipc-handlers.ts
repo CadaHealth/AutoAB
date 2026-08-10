@@ -16,6 +16,8 @@ interface AppPaths {
   backendDir: string;
   binDir: string;
   dataDir: string;
+  /** Writable location for analysis runs; outside the .app once packaged. */
+  outsDir: string;
   pythonPath: string;
   pythonIsBundled: boolean;
 }
@@ -266,7 +268,7 @@ export function setupIpcHandlers(
   // Called right before pipeline:start. Returns the staging dir path.
   ipcMain.handle('pipeline:stageFiles', async (_event, timepoints: { label: string; files: string[]; annotationFiles?: string[] }[], studyName: string) => {
     try {
-      const baseOuts = path.join(paths.backendDir, '..', 'geneGUI', 'outs');
+      const baseOuts = paths.outsDir;
       if (!fs.existsSync(baseOuts)) fs.mkdirSync(baseOuts, { recursive: true });
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -339,7 +341,7 @@ export function setupIpcHandlers(
     studyName: string;
   }) => {
     try {
-      const outsDir = path.join(paths.backendDir, '..', 'geneGUI', 'outs');
+      const outsDir = paths.outsDir;
       const result = await stageFromAirr({ ...input, outsDir });
       console.log('[IPC] stageFromAirr result:', {
         success: result.success,
@@ -357,7 +359,7 @@ export function setupIpcHandlers(
   ipcMain.handle('pipeline:start', async (event, config: any) => {
     return new Promise((resolve, reject) => {
       // Create a unique output directory per run so sessions don't overwrite each other
-      const baseOuts = path.join(paths.backendDir, '..', 'geneGUI', 'outs');
+      const baseOuts = paths.outsDir;
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const uniqueId = Math.random().toString(36).slice(2, 6);
       const outputDir = path.join(baseOuts, `run_${timestamp}_${uniqueId}`);

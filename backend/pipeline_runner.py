@@ -38,6 +38,7 @@ from utils import clonality as clone
 from utils.clonalityFunctions import (
     make_db, define_clonality, create_germline, findDist, ThresholdUnavailable,
 )
+from utils import toolpaths
 from utils.toolpaths import exe, find_changeo_script, find_igblast_binary, find_rscript
 
 # Try to import DL clustering (optional)
@@ -146,16 +147,18 @@ class PipelineRunner:
         self.run_covid_matching = config.get('run_covid_matching', False)
         self.cov_abdab_path = config.get('cov_abdab_database_path', '')
         
-        # Set up paths
-        self.bin_dir = os.path.join(self.backend_dir, '..', 'geneGUI', 'bin')
-        self.data_dir = os.path.join(self.backend_dir, '..', 'geneGUI', 'data')
-        
+        # Set up paths. Resolved centrally, because the packaged app has no
+        # geneGUI directory: electron-builder flattens the resources into
+        # Resources/{bin,data}, and scratch space has to live outside the
+        # read-only bundle.
+        self.bin_dir = config.get('bin_dir') or toolpaths.bin_dir()
+        self.data_dir = config.get('data_dir') or toolpaths.data_dir()
+
         # Create output directory
         if self.output_dir:
             os.makedirs(self.output_dir, exist_ok=True)
         else:
-            self.output_dir = os.path.join(self.backend_dir, '..', 'geneGUI', 'outs')
-            os.makedirs(self.output_dir, exist_ok=True)
+            self.output_dir = toolpaths.outs_dir()
         
         # Normalize the output directory path to absolute and resolve any ../
         self.output_dir = os.path.abspath(self.output_dir)
@@ -441,7 +444,10 @@ class PipelineRunner:
                     os.path.join(imgt_dir, f'{stem}_C.fasta'),
                 ]
                 if self.species == 'human':
-                    # Legacy fallback path (Immcantation default install location)
+                    # Legacy fallback: an Immcantation install in the user's home
+                    # directory. Deliberately ranked below the bundled database,
+                    # a machine that happens to have one was silently supplying
+                    # the C-gene reference while the shipped one went unused.
                     candidates.append(
                         os.path.expanduser('~/share/germlines/imgt/human/constant/imgt_human_IGHC.fasta')
                     )
@@ -676,41 +682,59 @@ class PipelineRunner:
         self.emit.progress("blast_db", 20, "Building BLAST databases...")
         
         makeblastdb_path = find_igblast_binary(self.bin_dir, 'makeblastdb')
-        db_files_dir = os.path.join(self.data_dir, 'Database-Files')
+        # Generated indexes are build products, not reference data, so they go
+        # to the writable cache rather than next to the shipped FASTAs. Inside
+        # the packaged app the data directory sits in Contents/Resources, where
+        # makeblastdb cannot write: it failed for every database while this
+        # method still reported success, and IgBLAST then found 0 hits.
+        db_files_dir = os.path.join(toolpaths.cache_dir(), 'Database-Files')
         os.makedirs(db_files_dir, exist_ok=True)
-        
+
         import subprocess
-        
+
+        failures = []
+
         for db_type, clean_path in [('V', self.database_v_clean), ('D', self.database_d_clean), ('J', self.database_j_clean)]:
             db_name = os.path.basename(clean_path)
             db_out = os.path.join(db_files_dir, db_name)
-            
+
             # List form, no shell: any of these paths may contain spaces.
-            result = subprocess.run(
+            proc = subprocess.run(
                 [makeblastdb_path, '-parse_seqids', '-dbtype', 'nucl', '-in', clean_path, '-out', db_out],
                 capture_output=True, text=True
-            ).returncode
+            )
 
-            if result != 0:
-                self.emit.log("warn", f"makeblastdb for {db_type} returned non-zero exit code")
-            
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or '').strip().splitlines()
+                self.emit.log("error", f"makeblastdb failed for {db_type}: {detail[-1] if detail else 'no output'}")
+                failures.append(db_type)
+
             # Store the database path for later use
             setattr(self, f'igblast_db_{db_type.lower()}', db_out)
-        
-        # Build C gene BLAST database if available
+
+        # Build C gene BLAST database if available. Isotype annotation is a
+        # bonus, so a failure here is reported but does not stop the run.
         if getattr(self, 'database_c_clean', None) and os.path.exists(self.database_c_clean):
             cname = os.path.basename(self.database_c_clean)
             db_out = os.path.join(db_files_dir, cname)
-            result = subprocess.run(
+            proc = subprocess.run(
                 [makeblastdb_path, '-parse_seqids', '-dbtype', 'nucl', '-in', self.database_c_clean, '-out', db_out],
                 capture_output=True, text=True
-            ).returncode
-            if result != 0:
-                self.emit.log("warn", "makeblastdb for C returned non-zero exit code")
+            )
+            if proc.returncode != 0:
+                self.emit.log("warn", "makeblastdb for C failed; isotypes will not be annotated")
             else:
                 self.igblast_db_c = db_out
                 self.emit.log("info", "C gene BLAST database built for isotype annotation")
-        
+
+        if failures:
+            self.emit.log(
+                "error",
+                "Could not build the BLAST databases for: " + ", ".join(failures)
+                + ". Without them IgBLAST cannot align anything, so the run is stopping here."
+            )
+            return False
+
         self.emit.log("info", "BLAST databases built successfully")
         return True
     

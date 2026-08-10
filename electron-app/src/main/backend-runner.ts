@@ -5,6 +5,7 @@
  */
 
 import { spawn, ChildProcess, execFileSync } from 'child_process';
+import { app } from 'electron';
 import * as path from 'path';
 import * as readline from 'readline';
 import * as fs from 'fs';
@@ -14,6 +15,10 @@ interface BackendRunnerOptions {
   backendDir: string;
   binDir: string;
   dataDir: string;
+  /** Writable working directory, outside the .app once packaged. */
+  outsDir: string;
+  /** Writable location for generated BLAST indexes. */
+  cacheDir: string;
   pythonPath?: string;
 }
 
@@ -106,6 +111,13 @@ function spawnEnv(binDir: string, pythonPath: string | undefined, extra: Record<
     if (key.toLowerCase() === 'path') delete env[key];
   }
   env.PATH = buildSpawnPath(binDir, pythonPath);
+
+  // The backend cannot work its own resource locations out. In a checkout they
+  // sit at ../geneGUI/{bin,data}; in the packaged app electron-builder
+  // flattens them to Resources/{bin,data}, and deriving them from backend/
+  // produced "Database V not found" on every packaged run.
+  env.AUTOAB_BIN_DIR = binDir;
+
   return env;
 }
 
@@ -162,7 +174,10 @@ export class BackendRunner {
     
     // Prepare environment
     const env = spawnEnv(this.options.binDir, this.options.pythonPath, {
-      IGDATA: this.options.dataDir
+      IGDATA: this.options.dataDir,
+      AUTOAB_DATA_DIR: this.options.dataDir,
+      AUTOAB_OUTS_DIR: this.options.outsDir,
+      AUTOAB_CACHE_DIR: this.options.cacheDir
     });
 
     // Spawn Python process with detached flag to create a new process group
@@ -370,6 +385,9 @@ export class BackendRunner {
     
     const env = spawnEnv(this.options.binDir, this.options.pythonPath, {
       IGDATA: this.options.dataDir,
+      AUTOAB_DATA_DIR: this.options.dataDir,
+      AUTOAB_OUTS_DIR: this.options.outsDir,
+      AUTOAB_CACHE_DIR: this.options.cacheDir,
       PYTHONUNBUFFERED: '1'  // Ensure Python flushes stdout immediately
     });
 
@@ -431,7 +449,10 @@ export class BackendRunner {
     
     // Prepare environment
     const env = spawnEnv(this.options.binDir, this.options.pythonPath, {
-      IGDATA: this.options.dataDir
+      IGDATA: this.options.dataDir,
+      AUTOAB_DATA_DIR: this.options.dataDir,
+      AUTOAB_OUTS_DIR: this.options.outsDir,
+      AUTOAB_CACHE_DIR: this.options.cacheDir
     });
 
     // Spawn Python process with detached flag to create a new process group
@@ -530,7 +551,10 @@ export class BackendRunner {
     const pipelineScript = path.join(this.options.backendDir, 'pipeline_runner.py');
 
     const env = spawnEnv(this.options.binDir, this.options.pythonPath, {
-      IGDATA: this.options.dataDir
+      IGDATA: this.options.dataDir,
+      AUTOAB_DATA_DIR: this.options.dataDir,
+      AUTOAB_OUTS_DIR: this.options.outsDir,
+      AUTOAB_CACHE_DIR: this.options.cacheDir
     });
 
     const child = spawn(this.options.pythonPath!, [pipelineScript], {

@@ -24,21 +24,21 @@ def blast_get_top_hits_v(input_fp, db_V_fp, db_J_fp, db_D_fp, organism='human', 
     :param db_C_fp: string, optional, path to C gene BLAST database (for IgBLAST >= 1.18)
     :return: a tuple of (df, output data)
     """
-    # Calculate paths if not provided
+    # Calculate paths if not provided. Resolved centrally rather than derived
+    # from this file's location: the packaged app has no geneGUI directory, its
+    # resources are flattened into Resources/{bin,data}, and its scratch space
+    # lives outside the bundle entirely.
     if bin_dir is None or data_dir is None or output_dir is None:
-        # Get the geneGUI directory path - go up from backend/utils to geneGUI
-        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        geneHome = os.path.join(backend_dir, '..', 'geneGUI')
-        geneHome = os.path.abspath(geneHome)
-        
+        from .toolpaths import bin_dir as _bin, data_dir as _data, outs_dir as _outs
+
         if bin_dir is None:
-            bin_dir = os.path.join(geneHome, 'bin')
+            bin_dir = _bin()
         if data_dir is None:
-            data_dir = os.path.join(geneHome, 'data')
+            data_dir = _data()
         if output_dir is None:
-            output_dir = os.path.join(geneHome, 'outs')
-    else:
-        geneHome = os.path.dirname(bin_dir) if bin_dir else os.path.dirname(data_dir)
+            output_dir = _outs()
+
+    geneHome = os.path.dirname(bin_dir) if bin_dir else os.path.dirname(data_dir)
     
     #runs the igblastn command
     igblastn_path = find_igblast_binary(bin_dir, 'igblastn')

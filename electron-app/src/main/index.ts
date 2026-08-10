@@ -63,6 +63,62 @@ function getDataPath(): string {
   return path.join(resourcesPath, 'data');
 }
 
+/**
+ * BLAST+ cannot cope with whitespace in any path it is given.
+ *
+ * It re-parses its own arguments and splits on spaces, so quoting and argv
+ * separation do not help: `-in` reports "File /Users/x/Library/Application does
+ * not exist" and `-out` reports "Please provide a database name using -out".
+ * That rules out ~/Library/Application Support, which is where Electron's
+ * userData lives, for anything the aligner touches.
+ */
+function hasWhitespace(p: string): boolean {
+  return /\s/.test(p);
+}
+
+/**
+ * Generated BLAST indexes.
+ *
+ * In a checkout these have always lived beside the reference FASTAs, and
+ * .gitignore already covers them there. Once packaged that location is inside
+ * the read-only bundle, where makeblastdb failed for every database.
+ */
+function getCachePath(): string {
+  // ~/Library/Caches has no space in it, unlike userData's parent.
+  // Electron has no 'cache' path name, so build it from home.
+  let dir = isDev
+    ? getDataPath()
+    : process.platform === 'darwin'
+      ? path.join(app.getPath('home'), 'Library', 'Caches', 'com.bcr-analysis.app')
+      : path.join(app.getPath('userData'), 'cache');
+
+  if (hasWhitespace(dir)) dir = path.join(os.tmpdir(), 'autoab-cache');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
+ * Where analysis runs are written.
+ *
+ * Unlike the resource directories this one is written to, so once packaged it
+ * must live outside the .app: an application installed in /Applications is not
+ * writable by the user running it. Deriving it from the backend directory put
+ * results inside Contents/Resources, which only worked because the app was
+ * still sitting in its build folder.
+ *
+ * ~/Documents/AutoAB rather than userData: it has no space in it, and results
+ * are something the user should be able to find.
+ */
+function getOutsPath(): string {
+  let dir = isDev
+    ? path.join(getResourcesPath(), '..', 'geneGUI', 'outs')
+    : path.join(app.getPath('home'), 'Documents', 'AutoAB');
+
+  if (hasWhitespace(dir)) dir = path.join(os.tmpdir(), 'autoab-runs');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function createWindow(): void {
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -289,6 +345,8 @@ function initBackendRunner(): void {
     backendDir: backendPath,
     binDir: binPath,
     dataDir: dataPath,
+    outsDir: getOutsPath(),
+    cacheDir: getCachePath(),
     pythonPath: resolvePythonPath()
   });
 }
@@ -309,6 +367,7 @@ app.whenReady().then(() => {
     backendDir: getBackendPath(),
     binDir: getBinPath(),
     dataDir: getDataPath(),
+    outsDir: getOutsPath(),
     pythonPath: resolvePythonPath(),
     pythonIsBundled: getBundledPythonPath() !== null
   });

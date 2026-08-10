@@ -37,6 +37,10 @@ extraResources:
     to: data
     filter:
       - "**/*"
+      # Generated BLAST indexes from the developer's own runs. They are rebuilt
+      # into the user's cache on first use, and shipping them would put stale
+      # indexes inside a directory the app can no longer write to.
+      - "!Database-Files/**"
 
   # Self-contained Python interpreter with changeo/presto/biopython already
   # installed, built by scripts/bundle-python.sh. ${arch} keeps the arm64 and

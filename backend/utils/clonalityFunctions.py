@@ -4,12 +4,12 @@ import matplotlib.image as mpimg
 import sys
 import os
 
-from .toolpaths import find_changeo_script, find_rscript
+from .toolpaths import find_changeo_script, find_rscript, outs_dir as _resolve_outs_dir
 
-# Get paths - calculate from backend/utils to geneGUI
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-geneHome = os.path.abspath(os.path.join(backend_dir, '..', 'geneGUI'))
-outs_dir = os.path.join(geneHome, "outs")
+# Resolved rather than derived from backend/: inside the packaged app the
+# repository layout does not exist, and this directory is written to.
+outs_dir = _resolve_outs_dir()
 
 
 def make_db(i, rj, rv, rd, s):

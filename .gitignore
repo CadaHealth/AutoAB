@@ -61,3 +61,7 @@ geneGUI/data/Database-Files/
 *.swo
 *~
 *.code-workspace
+
+# Test artefacts
+electron-app/finder-pipeline-final.png
+electron-app/e2e-final.png

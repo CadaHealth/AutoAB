@@ -1,12 +1,13 @@
 from utils import clonalityFunctions
+from utils.toolpaths import outs_dir as _resolve_outs_dir
 import subprocess
 import os
 
 DIST = 0
 
-# Get outs directory path - go up to geneGUI directory
-geneHome = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-outs_dir = os.path.join(geneHome, "outs")
+# Resolved centrally. Deriving it from this file's location put it inside the
+# .app bundle when packaged, which the user cannot write to.
+outs_dir = _resolve_outs_dir()
 
 
 def generate_db_dist(j, v, d, fasta):

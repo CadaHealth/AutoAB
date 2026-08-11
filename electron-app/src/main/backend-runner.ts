@@ -107,6 +107,14 @@ function buildSpawnPath(binDir: string, pythonPath?: string): string {
  */
 function spawnEnv(binDir: string, pythonPath: string | undefined, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+
+  // The interpreter and the backend both live inside the .app, so the first run
+  // would drop __pycache__ directories next to them -- 177 of them in one test
+  // run. Every one of those is a file the code signature did not seal, and
+  // `codesign --verify` then fails with "a sealed resource is missing or
+  // invalid". Gatekeeper has already admitted the app by then, but the bundle
+  // no longer matches what Apple notarised, which is not a state to ship into.
+  env.PYTHONDONTWRITEBYTECODE = '1';
   for (const key of Object.keys(env)) {
     if (key.toLowerCase() === 'path') delete env[key];
   }

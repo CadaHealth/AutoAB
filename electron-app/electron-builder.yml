@@ -83,6 +83,17 @@ mac:
     LSMinimumSystemVersion: "11.0"
 
 dmg:
+  # The volume name must not contain spaces. electron-builder's default title is
+  # "${productName} ${version}", and hdiutil then mounts the staging image at
+  # "/Volumes/Clono 1.0.0-arm64" and fails to read back what it just wrote:
+  #
+  #   could not access /Volumes/Clono 1.0.0-arm64/Clono.app - Operation not permitted
+  #   hdiutil: create failed - Operation not permitted
+  #
+  # Same command with a hyphenated volume name succeeds every time. The failure
+  # is silent in electron-builder's normal output, which retries six times and
+  # then reports only ERR_ELECTRON_BUILDER_CANNOT_EXECUTE.
+  title: Clono-${version}
   contents:
     - x: 130
       y: 220

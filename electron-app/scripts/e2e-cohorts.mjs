@@ -132,6 +132,7 @@ step('Running pipeline, answering threshold dialogs');
 const deadline = Date.now() + 30 * 60 * 1000;
 let answered = 0;
 let sawResults = false;
+const fallbacks = [];
 
 while (Date.now() < deadline) {
   // The dialog's action is labelled just "Apply". Matching on the primary
@@ -141,13 +142,22 @@ while (Date.now() < deadline) {
   if (await confirm.count()) {
     const shot = path.join(SHOTS, `04_threshold_${answered + 1}.png`);
     await win.screenshot({ path: shot }).catch(() => {});
+    // The dialog names the method behind each estimate. A run where the model
+    // fit failed falls back to the median nearest-neighbour distance, which is
+    // far looser and inflates cross-patient clone sharing -- not a run to build
+    // results on, so it is reported and the caller can retry.
+    const modal = await win.locator('.modal, [class*="modal"]').first().innerText().catch(() => '');
+    if (/model fit failed/i.test(modal)) {
+      fallbacks.push(modal.split('\n').filter((l) => /fit failed/i.test(l)).join(' | ').slice(0, 160));
+      console.log(`    !! fallback threshold in dialog ${answered + 1}`);
+    }
     await confirm.last().click().catch(() => {});
     answered += 1;
     console.log(`    threshold dialog ${answered} confirmed`);
     await win.waitForTimeout(2500);
     continue;
   }
-  if (await win.locator('text=Repertoire Dashboard').count()) { sawResults = true; break; }
+  if (await win.locator('text=Analysis Results').count()) { sawResults = true; break; }
   await win.waitForTimeout(4000);
 }
 console.log(`  thresholds answered: ${answered}`);
@@ -161,8 +171,7 @@ await win.waitForTimeout(6000);
 
 // ------------------------------------------------------------------ figures
 step('Capturing result views');
-const tabs = ['Repertoire Dashboard', 'Sequence Browser', 'Phylogenetic Trees',
-               'Clonal Dynamics', 'Shared Clones', 'COVID-DB Matching'];
+const tabs = ['Sequence Browser', 'Dashboard', 'Phylogenetic Trees', 'Clones', 'COVID-DB Matching'];
 let n = 5;
 for (const tab of tabs) {
   const el = win.locator(`button:has-text("${tab}"), [role="tab"]:has-text("${tab}")`).first();
@@ -176,7 +185,7 @@ for (const tab of tabs) {
 }
 
 // Individual charts, which is what the thesis figures actually show.
-await win.locator('button:has-text("Repertoire Dashboard"), [role="tab"]:has-text("Repertoire Dashboard")').first().click().catch(() => {});
+await win.locator('button:has-text("Dashboard")').first().click().catch(() => {});
 await win.waitForTimeout(4000);
 const charts = await win.locator('.chart-card, .metric-card, .chart-container, figure').all();
 console.log(`  chart containers found: ${charts.length}`);
@@ -189,3 +198,9 @@ const out = await win.evaluate(() => document.body.innerText).catch(() => '');
 fs.writeFileSync(path.join(SHOTS, 'results_text.txt'), out);
 ok(`figures written to ${SHOTS}`);
 await app.close();
+if (fallbacks.length) {
+  console.log(`\nFALLBACK THRESHOLDS: ${fallbacks.length}`);
+  fallbacks.forEach((f) => console.log(`  ${f}`));
+  process.exit(2);
+}
+console.log('\nall thresholds came from a model fit');

@@ -20,8 +20,8 @@ signed and notarised, so macOS opens them without a warning. Requires macOS 11
 or later.
 
 **Install [R ≥ 4.3](https://cran.r-project.org/) as well.** It is the one thing
-not inside the app. Everything else — Python, IgBLAST, IQ-TREE, Change-O,
-pRESTO, the IMGT references — ships in the bundle, and the Setup screen on first
+not inside the app. Everything else ships in the bundle: Python, IgBLAST,
+IQ-TREE, Change-O, pRESTO and the IMGT references. The Setup screen on first
 launch installs the R packages and Rosetta 2 for you.
 
 Windows is not supported; see [docs/WINDOWS.md](docs/WINDOWS.md).
@@ -66,6 +66,6 @@ If something goes wrong: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Licence
 
-AGPL-3.0, or a commercial licence — see [LICENSE](LICENSE) and
+AGPL-3.0, or a commercial licence. See [LICENSE](LICENSE) and
 [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md). Third-party tools bundled in the
 release carry their own terms, listed in [ATTRIBUTION.md](ATTRIBUTION.md).

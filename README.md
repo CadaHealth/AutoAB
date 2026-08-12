@@ -8,6 +8,38 @@ result as an interactive dashboard.
 The pipeline is Python and R (IgBLAST, Change-O, presto, Alakazam, Shazam); the
 interface is an Electron + Svelte app that drives it and renders the output.
 
+## Origin and citation
+
+AutoAB was built as the research instrument for a master's thesis on B-cell
+receptor repertoires in Long COVID, and the analysis reported there was run
+with it. The design goal follows from that: an analysis that previously took a
+dozen command-line invocations with hand-managed intermediate files should be
+reproducible by an immunologist rather than only by a bioinformatician, without
+giving up the established methods underneath.
+
+The analytical core is the Immcantation stack. What AutoAB adds around it is
+study design, per-timepoint threshold review, cohort comparison, lineage
+reconstruction and the visual analysis, as one tool with a single input step —
+and a distribution that installs without a toolchain.
+
+> Teichmann, J. (2026). *AutoAB: an integrated desktop pipeline for B-cell
+> receptor repertoire analysis.* Master's thesis.
+
+Please cite the underlying tools as well; they are listed in
+[ATTRIBUTION.md](ATTRIBUTION.md).
+
+## Download
+
+Signed and notarised builds for macOS 11 and later are on the
+[releases page](https://github.com/CadaHealth/AutoAB/releases/latest):
+`Clono-1.0.0-arm64.dmg` for Apple Silicon, `Clono-1.0.0.dmg` for Intel.
+
+Open the disk image, drag the app to Applications, launch it. **R is the only
+thing you install yourself.** Everything else — the Python interpreter,
+IgBLAST, IQ-TREE, Change-O, pRESTO, the IMGT references — is inside the app,
+and the Setup screen installs the R packages and Rosetta 2 for you. The build
+instructions further down are for developing it, not for using it.
+
 ## What it does
 
 Given one or more cohorts of sequences, AutoAB will:
@@ -42,7 +74,7 @@ and Rosetta 2 for you.
 
 To **build or develop** it:
 
-- macOS or Linux (x86-64 binaries; on Apple Silicon they run under Rosetta 2)
+- macOS or Linux. On Apple Silicon the app itself is native; IgBLAST needs Rosetta 2
 - Python ≥ 3.11
 - R ≥ 4.3 with `alakazam`, `shazam`, `ggplot2`, `dplyr`, `tidyr`, `ape`
 - Node.js ≥ 20
@@ -134,24 +166,46 @@ result artifacts all flow through that one channel.
 
 ## Reproducibility
 
-Repeat runs on identical input do **not** give identical clone counts. The
-clonal distance threshold comes from shazam's gamma-gamma mixture fit, which
-draws random starting points from a source outside R's seeded RNG; across eight
-calls on the same data it spanned 17.4% of its mean, and the clone count moves
-with it (361 / 363 / 365 in three runs of the same subset).
+The clonal distance threshold is estimated per run from shazam's gamma-gamma
+mixture fit, which draws its starting points from a source outside R's seeded
+RNG. Repeat runs on identical input therefore produce slightly different
+thresholds, and occasionally the fit fails to converge and the cascade falls
+back to another estimator. **What matters is how far that carries into the
+results, and for clone assignment the answer is: barely.**
+
+Measured on one timepoint, holding the data fixed and varying only the
+threshold across its full observed range:
+
+| Threshold | Clones | Largest clone | Singletons |
+|---|---|---|---|
+| 0.1167 | 607 | 10 | 584 |
+| 0.2085 | 606 | 10 | 583 |
+| 0.2889 | 599 | 10 | 570 |
+
+A factor of 2.5 in the threshold moves the clone count by 1.3% and leaves the
+largest clone untouched. Sequence counts, germline assignment and isotype calls
+are unaffected entirely: two runs of the same cohort on different CPU
+architectures returned the same 31,372 IgBLAST hits.
+
+**Counts of clones shared between donors are the exception** and are much more
+threshold-sensitive, because a looser threshold merges sequences from different
+donors into one clone. In one cohort the shared-clone count at a single
+timepoint ranged from 79 to 205 across thresholds from 0.306 to 0.4. Any
+analysis that leans on public clones should report the threshold and the method
+that produced it; the app logs both.
 
 This is the standard Immcantation method and is kept as the default. The
-threshold is shown for confirmation before clones are assigned, so a study can
-be pinned by entering a fixed value. For a deterministic estimate instead, set
-`AUTOAB_THRESHOLD_METHOD=density`. Measurements in
-[docs/VALIDATION.md](docs/VALIDATION.md).
+threshold and its estimator are shown for confirmation before clones are
+assigned, so a study can be pinned by entering a fixed value. For a fully
+deterministic estimate instead, set `AUTOAB_THRESHOLD_METHOD=density`.
+Measurements in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Platform support
 
 | Platform | State |
 |---|---|
-| macOS (Apple Silicon, Rosetta 2 for IgBLAST) | Verified end to end, including the GUI |
-| macOS (Intel) | Expected to work; not tested |
+| macOS (Apple Silicon) | Verified end to end, including the GUI. The app is native arm64; only IgBLAST runs under Rosetta 2 |
+| macOS (Intel) | Verified end to end, including the GUI |
 | Linux x86-64 | Install path implemented; not tested |
 | Windows | **Not supported.** See [docs/WINDOWS.md](docs/WINDOWS.md) |
 
@@ -165,6 +219,7 @@ by itself.
 |---|---|---|
 | Analysis code (`backend/`) | ✅ | |
 | IgBLAST, makeblastdb | ✅ | |
+| IQ-TREE 2.4.0 | ✅ native arm64 and x86-64 | |
 | IMGT references, CoV-AbDab | ✅ | |
 | Python interpreter | ✅ CPython 3.11, relocatable | |
 | changeo, presto, biopython, pandas | ✅ preinstalled into it | |

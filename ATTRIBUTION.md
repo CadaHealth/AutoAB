@@ -9,9 +9,18 @@ their own terms.
 
 ## Tools invoked by the pipeline
 
-These are not vendored here. They are installed separately (the conda
-environment brings them in) and executed as external processes. AutoAB calls
-them as command-line programs and does not link against them.
+AutoAB runs these as external processes and does not link against them.
+
+**In this source repository** they are not vendored: the conda environment or
+`scripts/install.sh` fetches them at build time.
+
+**In a packaged release they are redistributed.** The `.dmg` on the releases
+page carries IgBLAST, makeblastdb, IQ-TREE, Change-O, pRESTO, Biopython and a
+CPython interpreter inside the application bundle, so that R is the only thing
+a user installs. Each is the upstream release, unmodified, and its licence
+travels with it. IQ-TREE is GPL-2 and Change-O, pRESTO, Alakazam and Shazam are
+AGPL-3.0; corresponding sources are available from the project pages linked
+below.
 
 | Tool | Licence | Role |
 |---|---|---|

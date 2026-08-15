@@ -3,6 +3,7 @@
   import * as d3 from 'd3';
   import type { GroupTimepointMetrics } from '../../utils/repertoire-metrics';
   import { wilcoxonRankSum, benjaminiHochberg, formatPValue, significanceStars } from '../../utils/statistics';
+  import { metricCeiling, ceilingFraction, CHAO1_DEGENERATE_BELOW } from '../../utils/rarefaction';
 
   /**
    * Per-sample metrics for disease group (legacy 2-cohort API).
@@ -25,6 +26,23 @@
    * vs the first cohort (BH-FDR corrected). Each entry: { name, color, data }.
    */
   export let cohortsData: { name: string; color: string; data: GroupTimepointMetrics[] }[] | null = null;
+
+  /**
+   * Depth-normalised counterparts of diseaseData/controlData. When both are
+   * supplied the boxes and the tests are computed from them, and the
+   * unnormalised p-value stays on screen next to the normalised one, because
+   * the difference between the two is the actual finding.
+   *
+   * Null keeps every existing code path untouched, which is the guarantee that
+   * turning the feature off cannot move a published number.
+   */
+  export let rarefiedDisease: GroupTimepointMetrics[] | null = null;
+  export let rarefiedControl: GroupTimepointMetrics[] | null = null;
+  export let rarefactionDepth: number = 0;
+
+  $: normalized = !!(rarefiedDisease && rarefiedControl);
+  $: activeDisease = normalized ? rarefiedDisease! : diseaseData;
+  $: activeControl = normalized ? rarefiedControl! : controlData;
 
   /** Resolved cohorts list, either the explicit N-cohort prop or the legacy
    *  2-cohort one. The drawing logic only ever talks to this array. */
@@ -71,9 +89,11 @@
   const CONTROL_COLOR = '#757575';
 
   // ── Reactive data processing ──────────────────────────────
-  $: hasComparison = diseaseData.length > 0 && controlData.length > 0;
+  $: hasComparison = activeDisease.length > 0 && activeControl.length > 0;
 
-  // Collect all unique timepoint labels across both groups
+  // Timepoints come from the unnormalised data on purpose. A timepoint where
+  // every donor fell below the depth threshold must stay on the axis showing
+  // that it emptied out, rather than silently disappearing from the figure.
   $: allTimepoints = (() => {
     const tps = new Set<string>();
     for (const m of diseaseData) tps.add(m.timepointLabel);
@@ -91,8 +111,10 @@
     return map;
   }
 
-  $: diseasByTp = groupByTp(diseaseData);
-  $: controlByTp = groupByTp(controlData);
+  $: diseasByTp = groupByTp(activeDisease);
+  $: controlByTp = groupByTp(activeControl);
+  $: rawDiseaseByTp = groupByTp(diseaseData);
+  $: rawControlByTp = groupByTp(controlData);
 
   // Compute all statistical tests
   interface TestResult {
@@ -104,12 +126,20 @@
     adjustedP?: number;
   }
 
-  $: testResults = (() => {
-    if (!hasComparison) return [];
+  /**
+   * One BH-FDR pool over METRICS x timepoints, 8 x 3 = 24 for the standard
+   * study. The sequencing-depth diagnostic is deliberately not a member of
+   * METRICS: adding it would make this 27 and shift every adjusted p-value
+   * this tool has ever reported.
+   */
+  function runTests(
+    dByTp: Map<string, GroupTimepointMetrics[]>,
+    cByTp: Map<string, GroupTimepointMetrics[]>
+  ): TestResult[] {
     const results: TestResult[] = [];
     for (const tp of allTimepoints) {
-      const dData = diseasByTp.get(tp) ?? [];
-      const cData = controlByTp.get(tp) ?? [];
+      const dData = dByTp.get(tp) ?? [];
+      const cData = cByTp.get(tp) ?? [];
       for (const metric of METRICS) {
         const diseaseVals = dData.map(metric.accessor);
         const controlVals = cData.map(metric.accessor);
@@ -117,15 +147,23 @@
         results.push({ tp, metric, diseaseVals, controlVals, test });
       }
     }
-    // Apply BH-FDR correction across all valid tests
     const validIndices = results.map((r, i) => r.test.valid ? i : -1).filter(i => i >= 0);
     const validPs = validIndices.map(i => results[i].test.p);
     const adjusted = benjaminiHochberg(validPs);
-    validIndices.forEach((idx, j) => {
-      results[idx].adjustedP = adjusted[j];
-    });
+    validIndices.forEach((idx, j) => { results[idx].adjustedP = adjusted[j]; });
     return results;
-  })();
+  }
+
+  $: testResults = hasComparison ? runTests(diseasByTp, controlByTp) : [];
+
+  /**
+   * The same tests on the unnormalised data, corrected in their own pool so
+   * they stay exactly what the chart reported before normalisation existed.
+   * Only displayed, never used for the drawing.
+   */
+  $: rawTestResults = (normalized && diseaseData.length > 0 && controlData.length > 0)
+    ? runTests(rawDiseaseByTp, rawControlByTp)
+    : [];
 
   /** True when >2 cohorts are supplied via cohortsData, use N-cohort layout. */
   $: isNCohortMode = !!cohortsData && cohortsData.length > 2;
@@ -175,6 +213,67 @@
     return map;
   })();
 
+  /**
+   * Note about how much room a metric still has at the chosen depth.
+   *
+   * The wording matters as much as the arithmetic. A metric pinned to its
+   * ceiling is a property of how shallow the sequencing is, not a defect of
+   * the tool and not a fault of the study, so the note states what can and
+   * cannot be concluded rather than flagging a problem.
+   */
+  function ceilingNote(metricKey: string, tps: string[]): { text: string; warn: boolean } | null {
+    if (!normalized || rarefactionDepth <= 0) return null;
+
+    if (metricKey === 'chao1') {
+      if (rarefactionDepth >= CHAO1_DEGENERATE_BELOW) return null;
+      return {
+        text: `at depth ${rarefactionDepth} Chao1 is largely fixed by depth`,
+        warn: true,
+      };
+    }
+
+    // The top-10 share cannot mean anything once a sample holds at most ten
+    // clones: it is then exactly 1 for every donor in both groups.
+    if (metricKey === 'top10Frac' && rarefactionDepth <= 10) {
+      return {
+        text: `at depth ${rarefactionDepth} the top 10 clones are the entire sample`,
+        warn: true,
+      };
+    }
+
+    const ceiling = metricCeiling(metricKey, rarefactionDepth);
+    if (ceiling === null) return null;
+
+    // Warn only when BOTH groups sit near the ceiling at some timepoint: that
+    // is the case where a null result carries no information.
+    let worst = 0;
+    for (const tp of tps) {
+      const dVals = (diseasByTp.get(tp) ?? []).map(m => metricByKey(metricKey, m));
+      const cVals = (controlByTp.get(tp) ?? []).map(m => metricByKey(metricKey, m));
+      if (dVals.length === 0 || cVals.length === 0) continue;
+      const dMed = d3.quantile([...dVals].sort((a, b) => a - b), 0.5) ?? 0;
+      const cMed = d3.quantile([...cVals].sort((a, b) => a - b), 0.5) ?? 0;
+      const f = Math.min(
+        ceilingFraction(metricKey, rarefactionDepth, dMed) ?? 0,
+        ceilingFraction(metricKey, rarefactionDepth, cMed) ?? 0
+      );
+      if (f > worst) worst = f;
+    }
+
+    const label = metricKey === 'shannon'
+      ? `max ln(${rarefactionDepth}) = ${ceiling.toFixed(3)}`
+      : `max ${ceiling.toFixed(3)}`;
+    if (worst >= 0.97) {
+      return { text: `${label}, both groups at ${(worst * 100).toFixed(0)}% of it`, warn: true };
+    }
+    return { text: label, warn: false };
+  }
+
+  function metricByKey(key: string, m: GroupTimepointMetrics): number {
+    const def = METRICS.find(x => x.key === key);
+    return def ? def.accessor(m) : 0;
+  }
+
   /** Greedy interval-packing, assigns each bracket the lowest free level. */
   function packBrackets<T extends { left: number; right: number }>(items: T[]): { item: T; level: number }[] {
     const sorted = [...items].sort((a, b) => a.left - b.left || a.right - b.right);
@@ -191,7 +290,19 @@
   }
 
   // ── Draw charts (one SVG per metric) ────────────────────
-  $: if (container && (cohorts.length > 0 || diseaseData.length > 0 || controlData.length > 0)) {
+  //
+  // The dependency list has to be spelled out. Svelte tracks the variables
+  // read in a reactive statement, not the ones drawAllCharts() reaches for
+  // inside itself, so a statement that only mentioned cohorts and the raw
+  // props would leave the previous drawing on screen when normalisation was
+  // switched on or off: the chart still showed rarefied boxes after the
+  // toggle went back to off, which is precisely the case that must never
+  // misreport.
+  $: drawInputs = [
+    container, cohorts, activeDisease, activeControl, testResults, rawTestResults,
+    normalized, rarefactionDepth, publicationMode,
+  ];
+  $: if (container && drawInputs) {
     drawAllCharts();
   }
 
@@ -431,7 +542,9 @@
       ? { top: 16, right: 24, bottom: 56, left: 60 }
       : { top: 16, right: 20, bottom: 52, left: 52 };
     const rowHeight = publicationMode ? 170 : 155;
-    const pLabelSpace = 24;
+    // Two stacked p-values when normalised: the depth-matched one and the raw
+    // one it has to be read against.
+    const pLabelSpace = normalized ? 38 : 24;
     const legendHeight = 32;
     const totalHeight = rowHeight + pLabelSpace + margin.top + margin.bottom + legendHeight;
 
@@ -530,6 +643,27 @@
       .style('font-size', labelFontSize)
       .style('font-weight', publicationMode ? 'bold' : '600')
       .text(metric.label);
+
+    // Attainable-ceiling note, drawn on the legend row rather than above the
+    // plot: the space above holds the comparison brackets, and at three
+    // timepoints the note ran straight through the right-hand one.
+    //
+    // Without this note a large p-value at small depth reads as "the groups
+    // are alike" when it actually means the metric has no range left. Shannon
+    // cannot exceed ln(D), Simpson cannot exceed 1 - 1/D, and Chao1 at small D
+    // is decided by whether any clone happens to repeat at all.
+    if (normalized) {
+      const note = ceilingNote(metric.key, allTimepoints);
+      if (note) {
+        svg.append('text')
+          .attr('x', offsetX + margin.left + innerW)
+          .attr('y', totalHeight - legendHeight + 10)
+          .attr('text-anchor', 'end')
+          .style('font-size', publicationMode ? '9px' : '8.5px')
+          .style('fill', note.warn ? '#B45309' : '#999')
+          .text(note.text);
+      }
+    }
 
     // Clipped group
     const clippedG = g.append('g').attr('clip-path', `url(#${clipId})`);
@@ -642,7 +776,8 @@
             .style('font-size', pFontSize)
             .style('fill', isSignificant ? '#D32F2F' : '#888');
 
-          pTextEl.text(stars && stars !== 'ns' ? `${pDisplay} ${stars}` : pDisplay);
+          const mainLabel = stars && stars !== 'ns' ? `${pDisplay} ${stars}` : pDisplay;
+          pTextEl.text(normalized ? `D=${rarefactionDepth}  ${mainLabel}` : mainLabel);
 
           if (!publicationMode && testResult.test.valid) {
             pTextEl.append('title').text(
@@ -650,6 +785,25 @@
               `U = ${testResult.test.U}, r = ${testResult.test.r.toFixed(3)}\n` +
               `n(${diseaseName}) = ${testResult.test.n1}, n(${controlName}) = ${testResult.test.n2}`
             );
+          }
+
+          // The unnormalised p-value stays on screen. Replacing it would hide
+          // the only thing this comparison is for: whether the difference
+          // survives matched depth.
+          if (normalized) {
+            const raw = rawTestResults.find(r => r.tp === tp && r.metric.key === metric.key);
+            if (raw) {
+              const rawP = raw.test.valid
+                ? formatPValue(raw.adjustedP ?? raw.test.p)
+                : 'n too small';
+              g.append('text')
+                .attr('x', (leftX + rightX) / 2)
+                .attr('y', bracketTop - 14)
+                .attr('text-anchor', 'middle')
+                .style('font-size', pFontSize)
+                .style('fill', '#B0B0B0')
+                .text(`unnormalized ${rawP}`);
+            }
           }
         }
       }

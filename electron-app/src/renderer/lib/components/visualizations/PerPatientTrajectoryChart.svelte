@@ -12,6 +12,19 @@
   export let controlName: string = 'Control';
   export let publicationMode: boolean = false;
 
+  /**
+   * Depth the incoming metrics were normalised to, or null when they are not.
+   * Display only: the caller decides what to pass in, so nothing here can move
+   * a number while normalisation is off.
+   *
+   * The invariant this chart must preserve: meanSEM() below is fed one value
+   * per patient, and under normalisation that value is already the mean over
+   * that patient's draws. The band therefore stays the spread between
+   * patients and never absorbs the spread between draws, which would shrink
+   * it toward zero as the draw count rose.
+   */
+  export let normalizedDepth: number | null = null;
+
   let container: HTMLDivElement;
   let width = 800;
   let ro: ResizeObserver;
@@ -271,7 +284,10 @@
     if (hasComparison) {
       items.push({ label: controlName, color: CONTROL_COLOR });
     }
-    items.push({ label: 'Shaded area: ± SEM', color: 'none' });
+    items.push({ label: 'Shaded area: ± SEM between patients', color: 'none' });
+    if (normalizedDepth !== null) {
+      items.push({ label: `Depth-normalized to ${normalizedDepth} sequences per patient`, color: 'none' });
+    }
 
     let lx = 0;
     items.forEach(item => {

@@ -247,6 +247,14 @@ export interface PerPatientExportParams {
   controlCohortName?: string;
   /** Additional cohorts (N-cohort studies). Each appended as rows in the same CSV. */
   extraCohorts?: { name: string; fileGroups: FileGroup[]; timepointMapping: TimepointMapping }[];
+  /**
+   * Depth-normalisation state at export time. Written into the file as a
+   * provenance line, so a table cannot be separated from the setting that
+   * produced it. The metric rows and tests below stay unnormalised in either
+   * case: the depth-matched values belong to a comparison view, and mixing
+   * both into one column would make the file ambiguous.
+   */
+  normalization?: { enabled: boolean; depth: number; replicates: number; seed: number };
 }
 
 /**
@@ -257,6 +265,13 @@ export interface PerPatientExportParams {
 export function dashboardPerPatientCsv(params: PerPatientExportParams): string {
   const lines: string[] = [];
   const isoTypes = ['IgM', 'IgD', 'IgG', 'IgA', 'IgE'];
+
+  const norm = params.normalization;
+  lines.push(norm?.enabled
+    ? `# Depth normalization: on | depth=${norm.depth} | replicates=${norm.replicates} `
+      + `| seed=${norm.seed} | mean over draws | rows below are UNNORMALIZED`
+    : '# Depth normalization: off');
+  lines.push('# Clone-Assigned Sequences is the depth every clone-derived metric is computed on');
 
   // Collect all V-gene families across all files for consistent columns
   const allVFamilies = new Set<string>();

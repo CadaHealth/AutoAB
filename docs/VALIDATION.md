@@ -316,6 +316,45 @@ passed to `os.system`, which breaks on any install path containing a space and
 was only logged as a warning, leaving the pipeline to fail later with a
 confusing error. Both now use `subprocess.run` with an argument list.
 
+## 11. Depth normalization
+
+`scripts/validate-rarefaction.mjs` runs the shipped TypeScript, bundled with
+esbuild, over the clone-pass tables of a two-cohort study whose numbers were
+computed independently outside the application. Depths 10 and 20 are hardwired
+rather than taken from the default, so a change to the default rule cannot
+quietly change what is being tested.
+
+| Check | Depth 10 | Depth 20 |
+|---|---|---|
+| Shannon median, group A | 2.299 (reference 2.298) | 2.988 (reference 2.988) |
+| Shannon median, group B | 2.291 (reference 2.292) | 2.966 (reference 2.965) |
+| Donors retained | 19 and 11 | 19 and 6 |
+| p | 0.70 | 0.34 |
+
+Medians are asserted to three decimals. The p-value is asserted only to stay on
+the same side of 0.05: at these depths every donor sits within 1% of the
+attainable ceiling, so the ranking is decided by the draw and p moves between
+roughly 0.45 and 0.75 while the medians do not move at all. Quoting a rarefied
+p-value to two decimals at this depth would be over-precise.
+`scripts/verify-normalize-ui.mjs` additionally drives the toggle in the running
+application and asserts that switching it off returns the chart to
+text-identical output.
+
+**Averaging over draws uses the mean, not the median.** Shannon is capped at
+ln(D) and for most donors more than half the draws land exactly on that cap, so
+a median snaps to the ceiling and produces a wall of ties. The rank test is then
+decided by the few donors below it, which are the shallow ones, and the depth
+signal the procedure exists to remove walks back in. On the reference study the
+mean gives p = 0.46 and 0.26 at depths 10 and 20 where the median gives 0.021
+and 0.032, crossing the significance threshold in the wrong direction.
+
+**Not comparable to alakazam.** `alphaDiversity()` rarefies over Hill numbers
+with bootstrap confidence intervals, reporting q = 0 as richness, q = 1 as
+exp(Shannon) and q = 2 as inverse Simpson. What is normalized here are the raw
+Shannon, Simpson, Chao1, Gini and clone-share values the rest of the dashboard
+uses, averaged over uniform subsamples. The two will not agree numerically and
+are not meant to.
+
 ## Not covered
 
 - **Windows**, not supported; see [WINDOWS.md](WINDOWS.md) for the specific

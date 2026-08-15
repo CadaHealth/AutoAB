@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { resultsState, studyDesign, type StudyDesign, type TimepointMapping, type FileGroup, type CohortResults, GROUP_COLORS } from '../../lib/stores/app';
+  import { resultsState, studyDesign, saveDepthNormalization, type StudyDesign, type TimepointMapping, type FileGroup, type CohortResults, GROUP_COLORS } from '../../lib/stores/app';
   import {
     computeAllMetrics,
     computePerFileMetrics,
@@ -15,6 +15,11 @@
   import IsotypeComparisonChart from '../../lib/components/visualizations/IsotypeComparisonChart.svelte';
   import PerPatientTrajectoryChart from '../../lib/components/visualizations/PerPatientTrajectoryChart.svelte';
   import SequencingDepthPanel from '../../lib/components/visualizations/SequencingDepthPanel.svelte';
+  import {
+    rarefyDonor, suggestDepth,
+    DEFAULT_REPLICATES, DEFAULT_SEED, MIN_USEFUL_DEPTH,
+    type RarefactionSettings
+  } from '../../lib/utils/rarefaction';
 
   function buildDesignFromTimepointMapping(tpMapping: TimepointMapping, fileGroups: FileGroup[]): StudyDesign {
     const fileGroupNames = new Set(fileGroups.map(fg => fg.filename));
@@ -188,6 +193,86 @@
 
   $: filteredDiseasePerSample = diseasePerSampleMetrics.filter(m => diseaseEnabledSamples.has(m.groupName));
   $: filteredControlPerSample = controlPerSampleMetrics.filter(m => controlEnabledSamples.has(m.groupName));
+
+  // ── Depth normalisation ──────────────────────────────────
+  // Off by default. While it is off nothing below may change, so the rarefied
+  // arrays are simply not computed and the charts fall back to the originals.
+  let normalizeDepth = false;
+  let normDepth = MIN_USEFUL_DEPTH;
+  let depthInitialized = false;
+
+  /** Clone-assigned depth of every donor currently in the comparison. */
+  $: comparisonDepths = [
+    ...diseasePerSampleMetrics.map(m => m.diversity.clonedSequences),
+    ...controlPerSampleMetrics.map(m => m.diversity.clonedSequences),
+  ].filter(d => d > 0);
+
+  $: depthSuggestion = suggestDepth(comparisonDepths);
+
+  // Seed the field from the suggestion exactly once, then leave it alone.
+  // Tracking "has the user edited this" instead and re-asserting the
+  // suggestion on every pass is the obvious alternative and it fights the
+  // input: suggestDepth() returns a fresh object each time, so that statement
+  // re-runs constantly and any missed edit flag silently overwrites what was
+  // typed. Setting it once cannot do that. The reset button below is the
+  // explicit way back.
+  $: if (!depthInitialized && depthSuggestion.total > 0) {
+    normDepth = depthSuggestion.depth;
+    depthInitialized = true;
+  }
+
+  $: rarefaction = {
+    enabled: normalizeDepth,
+    depth: normDepth,
+    replicates: DEFAULT_REPLICATES,
+    seed: DEFAULT_SEED,
+  } as RarefactionSettings;
+
+  const rarefyFn = (depth: number) => (seqs: any[], key: string) =>
+    rarefyDonor(seqs, depth, key, DEFAULT_REPLICATES, DEFAULT_SEED);
+
+  $: diseasePerSampleRarefied = normalizeDepth ? computePerSampleMetrics(
+    diseaseHasDesign ? (hasCohorts ? diseaseDesign : singleDesign) : null,
+    hasCohorts ? (diseaseCohort?.fileGroups ?? []) : singleFileGroups,
+    new Set(diseaseMetrics.map(m => m.groupId)),
+    diseaseEnabledTimepoints,
+    rarefyFn(normDepth)
+  ) : [];
+
+  $: controlPerSampleRarefied = (normalizeDepth && hasCohorts) ? computePerSampleMetrics(
+    controlHasDesign ? controlDesign : null,
+    controlCohort?.fileGroups ?? [],
+    new Set(controlMetrics.map(m => m.groupId)),
+    controlEnabledTimepoints,
+    rarefyFn(normDepth)
+  ) : [];
+
+  /** Retention per group and timepoint, which is what the user has to see. */
+  $: retentionRows = (() => {
+    const tps = [...new Set([
+      ...diseasePerSampleMetrics.map(m => m.timepointLabel),
+      ...controlPerSampleMetrics.map(m => m.timepointLabel),
+    ])].sort();
+    const count = (arr: GroupTimepointMetrics[], tp: string, min: number) =>
+      arr.filter(m => m.timepointLabel === tp && m.diversity.clonedSequences >= min).length;
+    return tps.map(tp => ({
+      tp,
+      diseaseKept: count(diseasePerSampleMetrics, tp, normDepth),
+      diseaseTotal: diseasePerSampleMetrics.filter(m => m.timepointLabel === tp).length,
+      controlKept: count(controlPerSampleMetrics, tp, normDepth),
+      controlTotal: controlPerSampleMetrics.filter(m => m.timepointLabel === tp).length,
+    }));
+  })();
+
+  $: anyTimepointTooThin = retentionRows.some(r =>
+    (r.diseaseTotal > 0 && r.diseaseKept < 3) || (r.controlTotal > 0 && r.controlKept < 3));
+
+  // Carry the setting with the session so a restored run comes back showing
+  // what it was last read at, rather than silently reverting to off.
+  $: {
+    const dir = $resultsState.outputDir;
+    if (dir) saveDepthNormalization(dir, { ...rarefaction });
+  }
 
   // ── N-cohort generalization ────────────────────────────────
   // When 3+ cohorts are present (e.g. mouse 4 treatment groups), build per-
@@ -507,6 +592,7 @@
         controlTimepointMapping: !useNCohortLayout && hasCohorts ? (controlCohort?.timepointMapping ?? undefined) : undefined,
         controlCohortName: !useNCohortLayout && hasCohorts ? (controlCohort?.cohortName ?? 'Control') : undefined,
         extraCohorts,
+        normalization: rarefaction,
       });
       await downloadCsv(csv, 'repertoire_per_patient_metrics.csv');
     } catch (err: any) {
@@ -1228,10 +1314,80 @@
             {publicationMode}
           />
         </section>
+        {#if hasCohorts && !useNCohortLayout}
+          <div class="norm-bar" class:norm-on={normalizeDepth}>
+            <label class="norm-toggle">
+              <input type="checkbox" bind:checked={normalizeDepth} />
+              <span>Normalize sequencing depth</span>
+            </label>
+            {#if normalizeDepth}
+              <label class="norm-depth">
+                Depth
+                <input
+                  type="number"
+                  min={MIN_USEFUL_DEPTH}
+                  step="1"
+                  bind:value={normDepth}
+                />
+              </label>
+              <button class="norm-reset" on:click={() => (normDepth = depthSuggestion.depth)}>
+                reset to {depthSuggestion.depth}
+              </button>
+              <span class="norm-meta">
+                {DEFAULT_REPLICATES} draws, seed {DEFAULT_SEED}, mean per patient
+              </span>
+            {:else}
+              <span class="norm-meta">
+                Off. Values below are computed at each patient's own depth.
+              </span>
+            {/if}
+          </div>
+
+          {#if normalizeDepth}
+            <div class="norm-detail">
+              <table class="retention-table">
+                <thead>
+                  <tr>
+                    <th>Timepoint</th>
+                    <th>{diseaseCohort?.cohortName ?? 'Disease'}</th>
+                    <th>{controlCohort?.cohortName ?? 'Control'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each retentionRows as r}
+                    <tr>
+                      <td class="tp">{r.tp}</td>
+                      <td class:thin={r.diseaseTotal > 0 && r.diseaseKept < 3}>{r.diseaseKept} of {r.diseaseTotal}</td>
+                      <td class:thin={r.controlTotal > 0 && r.controlKept < 3}>{r.controlKept} of {r.controlTotal}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+              <p class="norm-note">
+                Patients retained at depth {normDepth}. Each retained patient is reduced to a
+                random sample of {normDepth} clone-assigned sequences, {DEFAULT_REPLICATES} times, and the
+                metrics are averaged over those draws. Unnormalized values stay visible
+                alongside each comparison.
+                {#if depthSuggestion.atFloor}
+                  The suggested depth sits at the floor of {MIN_USEFUL_DEPTH}, meaning most
+                  patients in this study are too shallow for depth-matched comparison.
+                {/if}
+                {#if anyTimepointTooThin}
+                  At least one timepoint drops below three patients in a group, where no
+                  rank test can run. Lower the depth or read that timepoint as unresolved.
+                {/if}
+              </p>
+            </div>
+          {/if}
+        {/if}
+
         <div id="group-comparison-chart">
           <GroupComparisonChart
             diseaseData={diseasePerSampleMetrics}
             controlData={controlPerSampleMetrics}
+            rarefiedDisease={normalizeDepth ? diseasePerSampleRarefied : null}
+            rarefiedControl={normalizeDepth ? controlPerSampleRarefied : null}
+            rarefactionDepth={normDepth}
             diseaseName={hasCohorts ? (diseaseCohort?.cohortName ?? 'Disease') : 'All Samples'}
             controlName={controlCohort?.cohortName ?? 'Control'}
             cohortsData={useNCohortLayout ? nonEmptyCohortsData : null}
@@ -1261,10 +1417,11 @@
               {#if hasCohorts}Significant timepoint differences (BH-adjusted p &lt; 0.05) are marked with stars.{/if}
             </p>
             <PerPatientTrajectoryChart
-              diseaseData={diseasePerSampleMetrics}
-              controlData={controlPerSampleMetrics}
+              diseaseData={normalizeDepth ? diseasePerSampleRarefied : diseasePerSampleMetrics}
+              controlData={normalizeDepth ? controlPerSampleRarefied : controlPerSampleMetrics}
               diseaseName={hasCohorts ? (diseaseCohort?.cohortName ?? 'Disease') : 'All Samples'}
               controlName={controlCohort?.cohortName ?? 'Control'}
+              normalizedDepth={normalizeDepth ? normDepth : null}
             />
           </section>
         {/if}
@@ -1755,6 +1912,81 @@
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     color: var(--text-primary);
+  }
+  .norm-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: 8px 12px;
+    margin-bottom: var(--space-2);
+    border: 1px solid var(--border-light, #e5e7eb);
+    border-radius: 6px;
+    background: var(--surface-raised, #fff);
+    font-size: var(--text-xs);
+  }
+  .norm-bar.norm-on {
+    border-color: #93C5FD;
+    background: #EFF6FF;
+  }
+  .norm-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+  }
+  .norm-depth {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary, #555);
+  }
+  .norm-depth input {
+    width: 68px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-light, #d1d5db);
+    border-radius: 4px;
+    font-size: var(--text-xs);
+  }
+  .norm-reset {
+    padding: 2px 8px;
+    border: 1px solid var(--border-light, #d1d5db);
+    border-radius: 4px;
+    background: transparent;
+    font-size: 11px;
+    color: var(--text-secondary, #555);
+    cursor: pointer;
+  }
+  .norm-reset:hover { background: var(--gray-100, #f3f4f6); }
+  .norm-meta { color: var(--text-tertiary, #888); font-size: 11px; }
+  .norm-detail {
+    display: flex;
+    gap: var(--space-4);
+    align-items: flex-start;
+    padding: 0 12px var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+  .retention-table {
+    border-collapse: collapse;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .retention-table th, .retention-table td {
+    padding: 3px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border-light, #e5e7eb);
+    white-space: nowrap;
+  }
+  .retention-table th:first-child, .retention-table td:first-child { text-align: left; }
+  .retention-table th { font-weight: 600; color: var(--text-secondary, #555); }
+  .retention-table td.tp { font-weight: 600; color: #444; }
+  .retention-table td.thin { color: #B45309; font-weight: 600; }
+  .norm-note {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--text-secondary, #555);
   }
   .diag-tag {
     display: inline-block;

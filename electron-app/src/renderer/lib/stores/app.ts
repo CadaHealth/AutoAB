@@ -343,6 +343,29 @@ export interface SessionEntry {
   studyName?: string;
   studyDesign?: StudyDesign;
   cohorts?: SessionCohortEntry[];
+  /**
+   * Depth normalisation as it stood when the session was last viewed. Absent
+   * on sessions saved before the feature existed, and absence reads as off, so
+   * an old session restores to exactly the numbers it was saved with.
+   */
+  depthNormalization?: {
+    enabled: boolean;
+    depth: number;
+    replicates: number;
+    seed: number;
+  };
+}
+
+/** Persist the depth-normalisation view setting for one session. */
+export function saveDepthNormalization(
+  outputDir: string,
+  settings: SessionEntry['depthNormalization']
+): void {
+  const sessions = getSessions();
+  const s = sessions.find(x => x.outputDir === outputDir);
+  if (!s) return;
+  s.depthNormalization = settings;
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
 }
 
 const SESSIONS_KEY = 'bcr_sessions';

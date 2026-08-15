@@ -455,11 +455,20 @@ export function computePerFileMetrics(
  * Compute metrics per sample (file) within the selected groups and timepoints.
  * Returns one GroupTimepointMetrics per file for side-by-side comparison.
  */
+/**
+ * Optional replacement for computeDiversity, used to compute the same metrics
+ * on a depth-normalised subsample instead of the full donor. Returning null
+ * drops that donor, which is how donors below the chosen depth disappear.
+ * Passed as a hook so the study-design walking below stays a single code path.
+ */
+export type DiversityFn = (seqs: SequenceData[], donorKey: string) => DiversityMetrics | null;
+
 export function computePerSampleMetrics(
   design: StudyDesign | null,
   fileGroups: { filename: string; sequences: SequenceData[] }[],
   enabledGroupIds: Set<string>,
-  enabledTimepointLabels: Set<string>
+  enabledTimepointLabels: Set<string>,
+  diversityFn?: DiversityFn
 ): GroupTimepointMetrics[] {
   const results: GroupTimepointMetrics[] = [];
   const fileMap = new Map<string, { filename: string; sequences: SequenceData[] }>();
@@ -478,13 +487,17 @@ export function computePerSampleMetrics(
         for (const fileId of tp.files) {
           const fg = fileMap.get(fileId);
           if (!fg || fg.sequences.length === 0) continue;
+          const diversity = diversityFn
+            ? diversityFn(fg.sequences, `${fg.filename}|${tp.label}`)
+            : computeDiversity(fg.sequences);
+          if (!diversity) continue;
           results.push({
             groupId: group.id,
             groupName: fg.filename,
             groupColor: shadedColor,
             timepointId: tp.id,
             timepointLabel: tp.label,
-            diversity: computeDiversity(fg.sequences),
+            diversity,
             vGeneFreqs: computeVGeneFrequencies(fg.sequences),
             rankAbundance: computeRankAbundance(fg.sequences),
             isotypeFreqs: computeIsotypeFrequencies(fg.sequences)
@@ -499,13 +512,17 @@ export function computePerSampleMetrics(
       const groupId = `file-${i}`;
       const timepointLabel = fg.filename;
       if (!enabledGroupIds.has(groupId) || !enabledTimepointLabels.has(timepointLabel)) continue;
+      const diversity = diversityFn
+        ? diversityFn(fg.sequences, `${fg.filename}|${timepointLabel}`)
+        : computeDiversity(fg.sequences);
+      if (!diversity) continue;
       results.push({
         groupId,
         groupName: fg.filename,
         groupColor: FILE_COLORS[i % FILE_COLORS.length],
         timepointId: groupId,
         timepointLabel,
-        diversity: computeDiversity(fg.sequences),
+        diversity,
         vGeneFreqs: computeVGeneFrequencies(fg.sequences),
         rankAbundance: computeRankAbundance(fg.sequences),
         isotypeFreqs: computeIsotypeFrequencies(fg.sequences)

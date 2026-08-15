@@ -17,6 +17,15 @@ export interface DiversityMetrics {
   giniIndex: number;
   uniqueClones: number;
   totalSequences: number;
+  /**
+   * Sequences that carry a clone id, which is the depth every clone-derived
+   * metric is actually computed on. Distinct from totalSequences: that one is
+   * seqs.length and includes the light chains, which never reach DefineClones.
+   * The inflation is per-donor, so the two numbers cannot be converted into
+   * each other by a constant factor and the wrong one silently misstates
+   * sequencing depth.
+   */
+  clonedSequences: number;
   meanCloneSize: number;
   meanSHM: number;
   medianSHM: number;
@@ -263,6 +272,7 @@ export function computeDiversity(seqs: SequenceData[]): DiversityMetrics {
     giniIndex: giniIndex(sizes),
     uniqueClones,
     totalSequences,
+    clonedSequences,
     meanCloneSize,
     meanSHM: meanSHM(seqs),
     medianSHM: medianSHM(seqs),

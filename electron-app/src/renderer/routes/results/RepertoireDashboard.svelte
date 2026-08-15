@@ -14,6 +14,7 @@
   import GroupComparisonChart from '../../lib/components/visualizations/GroupComparisonChart.svelte';
   import IsotypeComparisonChart from '../../lib/components/visualizations/IsotypeComparisonChart.svelte';
   import PerPatientTrajectoryChart from '../../lib/components/visualizations/PerPatientTrajectoryChart.svelte';
+  import SequencingDepthPanel from '../../lib/components/visualizations/SequencingDepthPanel.svelte';
 
   function buildDesignFromTimepointMapping(tpMapping: TimepointMapping, fileGroups: FileGroup[]): StudyDesign {
     const fileGroupNames = new Set(fileGroups.map(fg => fg.filename));
@@ -276,6 +277,7 @@
       timepointLabel: '',
       diversity: {
         totalSequences: sum('totalSequences'),
+        clonedSequences: sum('clonedSequences'),
         uniqueClones: sum('uniqueClones'),
         meanCloneSize: avg('meanCloneSize'),
         shannonEntropy: avg('shannonEntropy'),
@@ -1206,6 +1208,26 @@
             Showing all {nonEmptyCohortsData.length} cohorts side-by-side. Statistical comparisons reduced to pairwise Wilcoxon (BH-corrected) for readability.
           </div>
         {/if}
+        <!-- Diagnostic, deliberately ahead of the boxplots and outside every
+             correction family: depth is the precondition the p-values below
+             rest on, so it has to be read first. No test runs here. -->
+        <section class="chart-panel full-width" id="sequencing-depth-panel">
+          <h3 class="chart-heading">Sequencing Depth per Patient <span class="diag-tag">diagnostic</span></h3>
+          <p class="chart-desc">
+            Clone-assigned sequences per patient, the depth every metric below is computed on.
+            Light chains are excluded because they never reach clonal assignment.
+            No statistical test is run here and this panel is not part of the multiple-testing
+            correction applied to the comparisons below.
+          </p>
+          <SequencingDepthPanel
+            diseaseData={diseasePerSampleMetrics}
+            controlData={controlPerSampleMetrics}
+            diseaseName={hasCohorts ? (diseaseCohort?.cohortName ?? 'Disease') : 'All Samples'}
+            controlName={controlCohort?.cohortName ?? 'Control'}
+            cohortsData={useNCohortLayout ? nonEmptyCohortsData : null}
+            {publicationMode}
+          />
+        </section>
         <div id="group-comparison-chart">
           <GroupComparisonChart
             diseaseData={diseasePerSampleMetrics}
@@ -1733,6 +1755,19 @@
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     color: var(--text-primary);
+  }
+  .diag-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--gray-100, #f3f4f6);
+    color: var(--text-tertiary, #6b7280);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
   }
   .chart-desc {
     margin: 0 0 var(--space-3) 0;

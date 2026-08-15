@@ -147,7 +147,7 @@ export function dashboardMetricsToCsv(
 
   const headers = [
     'Cohort', 'Group', 'Timepoint',
-    'Total Sequences', 'Unique Clones', 'Mean Clone Size',
+    'Total Sequences', 'Clone-Assigned Sequences', 'Unique Clones', 'Mean Clone Size',
     'Shannon Entropy', 'Simpson Index', 'Chao1', 'Gini Index',
     'Mean SHM', 'Median SHM', 'D50', 'Productive %',
     'Expanded Clones %', 'Top-1 Clone %', 'Top-10 Clones %',
@@ -162,7 +162,7 @@ export function dashboardMetricsToCsv(
       const iFreqMap = new Map(m.isotypeFreqs.map(i => [i.isotype, i.frequency]));
       lines.push(row([
         cohortName, m.groupName, m.timepointLabel,
-        m.diversity.totalSequences, m.diversity.uniqueClones,
+        m.diversity.totalSequences, m.diversity.clonedSequences, m.diversity.uniqueClones,
         m.diversity.meanCloneSize.toFixed(2),
         m.diversity.shannonEntropy.toFixed(4),
         m.diversity.simpsonIndex.toFixed(4),
@@ -299,7 +299,7 @@ export function dashboardPerPatientCsv(params: PerPatientExportParams): string {
 
   const headers = [
     'Cohort', 'Sample_ID', 'Timepoint',
-    'Total Sequences', 'Unique Clones', 'Mean Clone Size',
+    'Total Sequences', 'Clone-Assigned Sequences', 'Unique Clones', 'Mean Clone Size',
     'Shannon Entropy', 'Simpson Index', 'Chao1', 'Gini Index',
     'Mean SHM', 'Median SHM', 'D50', 'Productive %',
     'Expanded Clones %', 'Top-1 Clone %', 'Top-10 Clones %',
@@ -329,7 +329,7 @@ export function dashboardPerPatientCsv(params: PerPatientExportParams): string {
 
     lines.push(row([
       pr.cohort, pr.patientId, pr.timepoint,
-      div.totalSequences, div.uniqueClones,
+      div.totalSequences, div.clonedSequences, div.uniqueClones,
       div.meanCloneSize.toFixed(2),
       div.shannonEntropy.toFixed(4),
       div.simpsonIndex.toFixed(4),

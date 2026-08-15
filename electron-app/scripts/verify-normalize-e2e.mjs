@@ -40,6 +40,13 @@ for (let i = 0; i < 60 && !win; i++) {
 await win.waitForLoadState('domcontentloaded');
 await win.setViewportSize({ width: 1700, height: 1150 });
 win.on('pageerror', (e) => { console.log(`  [pageerror] ${String(e).slice(0, 200)}`); failures++; });
+// Playwright dismisses alert() automatically, so an export that fails and
+// reports the reason through alert() looks exactly like one that silently did
+// nothing. Print the message before letting it go.
+win.on('dialog', async (d) => {
+  console.log(`  [alert] ${d.message().slice(0, 300)}`);
+  await d.dismiss().catch(() => {});
+});
 
 let ready = false;
 for (let i = 0; i < 30 && !ready; i++) {
@@ -166,26 +173,56 @@ if (stored && stored.some((s) => s.dn.enabled && s.dn.depth === 10 && s.dn.repli
 // ---------------------------------------------------------------- publication mode
 console.log('\n=== publication figure export while normalized ===');
 const pubBtn = win.locator('button:has-text("Publication Figure")').first();
-if (await pubBtn.count()) {
-  const dlBefore = (await app.evaluate(() => globalThis.__dl.length));
+if (!(await pubBtn.count())) fail('publication figure button not found');
+else {
   await pubBtn.scrollIntoViewIfNeeded();
   await pubBtn.click();
   await win.waitForTimeout(900);
-  const group = win.locator('.export-dropdown-group').filter({ hasText: 'Group Comparison' }).first();
-  const target = (await group.count()) ? group : win.locator('.export-dropdown-group').first();
-  await target.locator('button.export-dropdown-item:has-text("PNG")').click().catch(() => {});
-  for (let i = 0; i < 25; i++) {
-    await win.waitForTimeout(1000);
-    if ((await app.evaluate(() => globalThis.__dl.length)) > dlBefore) break;
+  const offered = await win.locator('.export-dropdown-group .export-dropdown-label').allInnerTexts();
+  console.log(`        figures offered: ${offered.length}`);
+  await win.keyboard.press('Escape').catch(() => {});
+  await win.waitForTimeout(400);
+
+  for (const want of ['Sequencing Depth per Patient', 'Shannon Entropy']) {
+    const i = offered.findIndex((t) => t.trim() === want);
+    if (i < 0) { fail(`"${want}" is not offered for export`); continue; }
+    for (const fmt of ['PNG', 'SVG']) {
+      // Two attempts. The dropdown is a toggle, so if it is still open from a
+      // previous step the "open" click closes it and the item click lands on
+      // nothing. This is a quirk of driving the menu, not of the export, and
+      // the existing export-figures.mjs works around it the same way.
+      let got = null;
+      for (let attempt = 0; attempt < 2 && !got; attempt++) {
+        const dlBefore = await app.evaluate(() => globalThis.__dl.length);
+        await win.keyboard.press('Escape').catch(() => {});
+        await win.waitForTimeout(500);
+        await pubBtn.scrollIntoViewIfNeeded();
+        await pubBtn.click();
+        await win.waitForTimeout(900);
+        await win.locator('.export-dropdown-group').nth(i)
+          .locator(`button.export-dropdown-item:has-text("${fmt}")`).click().catch(() => {});
+        for (let t = 0; t < 25; t++) {
+          await win.waitForTimeout(1000);
+          const dl = await app.evaluate(() => globalThis.__dl);
+          if (dl.length > dlBefore) { got = dl[dl.length - 1]; break; }
+        }
+        if (!got && attempt === 0) console.log(`        ${want} ${fmt}: no file, retrying`);
+      }
+      if (!got) { fail(`${want} ${fmt} produced nothing`); continue; }
+      const kb = fs.existsSync(got) ? Math.round(fs.statSync(got).size / 1024) : 0;
+      if (kb < 5) { fail(`${want} ${fmt} is suspiciously small (${kb} KB)`); continue; }
+      // An SVG can be the right size and still be empty of the thing that
+      // matters, so check the normalisation annotations survived the export.
+      if (fmt === 'SVG' && want === 'Shannon Entropy') {
+        const svg = fs.readFileSync(got, 'utf8');
+        if (/unnormalized/.test(svg) && /max ln\(10\)/.test(svg)) {
+          pass('exported SVG carries the unnormalized p-value and the ceiling note');
+        } else fail('exported SVG lost the normalization annotations');
+      }
+      pass(`${want} ${fmt} -> ${path.basename(got)} (${kb} KB)`);
+    }
   }
-  const dl = await app.evaluate(() => globalThis.__dl);
-  if (dl.length > dlBefore) {
-    const f = dl[dl.length - 1];
-    const kb = fs.existsSync(f) ? Math.round(fs.statSync(f).size / 1024) : 0;
-    if (kb > 20) pass(`publication export produced ${path.basename(f)} (${kb} KB)`);
-    else fail(`publication export produced a suspiciously small file (${kb} KB)`);
-  } else fail('publication export produced nothing while normalized');
-} else fail('publication figure button not found');
+}
 
 await app.close();
 console.log(failures ? `\n${failures} FAILURE(S)\n` : '\nall checks passed\n');

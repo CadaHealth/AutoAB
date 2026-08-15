@@ -194,6 +194,37 @@
   $: filteredDiseasePerSample = diseasePerSampleMetrics.filter(m => diseaseEnabledSamples.has(m.groupName));
   $: filteredControlPerSample = controlPerSampleMetrics.filter(m => controlEnabledSamples.has(m.groupName));
 
+  // ── Depth diagnostic ─────────────────────────────────────
+  // Worst median-depth ratio between the two groups at any timepoint. Drives
+  // whether the diagnostic opens by itself: on a study with balanced depth
+  // there is nothing to look at and the panel would just be one more thing on
+  // screen, but on an imbalanced one it has to be seen before the p-values
+  // below it are read.
+  $: depthWorstRatio = (() => {
+    const tps = [...new Set(diseasePerSampleMetrics.map(m => m.timepointLabel))];
+    let worst = 0;
+    for (const tp of tps) {
+      const med = (arr: GroupTimepointMetrics[]) => {
+        const v = arr.filter(m => m.timepointLabel === tp)
+          .map(m => m.diversity.clonedSequences).sort((a, b) => a - b);
+        if (v.length === 0) return 0;
+        const i = v.length >> 1;
+        return v.length % 2 ? v[i] : (v[i - 1] + v[i]) / 2;
+      };
+      const d = med(diseasePerSampleMetrics);
+      const c = med(controlPerSampleMetrics);
+      if (d > 0 && c > 0) worst = Math.max(worst, Math.max(d, c) / Math.min(d, c));
+    }
+    return worst;
+  })();
+
+  let depthPanelOpen = false;
+  let depthPanelDecided = false;
+  $: if (!depthPanelDecided && diseasePerSampleMetrics.length > 0) {
+    depthPanelOpen = depthWorstRatio >= 2;
+    depthPanelDecided = true;
+  }
+
   // ── Depth normalisation ──────────────────────────────────
   // Off by default. While it is off nothing below may change, so the rarefied
   // arrays are simply not computed and the charts fall back to the originals.
@@ -480,6 +511,12 @@
 
   /** Figures that always appear (cross-cohort boxplots from Group Comparison). */
   const PUB_FIG_BOXPLOTS: PubFigureOption[] = [
+    // The depth diagnostic is exportable for the same reason it is on screen:
+    // a reviewer reading the boxplots needs to see the depth they rest on.
+    // Scoped to .depth-panel, not just the section: the collapse chevron in
+    // the section header is itself an <svg>, and a bare descendant selector
+    // exported that 12x12 icon instead of the figure.
+    { id: 'depth', label: 'Sequencing Depth per Patient', selector: '#sequencing-depth-panel .depth-panel svg', filename: 'sequencing_depth_per_patient' },
     { id: 'shannon', label: 'Shannon Entropy', selector: '#group-comparison-chart svg[data-metric="shannon"]', filename: 'boxplot_shannon_entropy' },
     { id: 'simpson', label: 'Simpson Index', selector: '#group-comparison-chart svg[data-metric="simpson"]', filename: 'boxplot_simpson_index' },
     { id: 'chao1', label: 'Chao1', selector: '#group-comparison-chart svg[data-metric="chao1"]', filename: 'boxplot_chao1' },
@@ -1298,7 +1335,22 @@
              correction family: depth is the precondition the p-values below
              rest on, so it has to be read first. No test runs here. -->
         <section class="chart-panel full-width" id="sequencing-depth-panel">
-          <h3 class="chart-heading">Sequencing Depth per Patient <span class="diag-tag">diagnostic</span></h3>
+          <button class="depth-header" on:click={() => (depthPanelOpen = !depthPanelOpen)}>
+            <span class="section-chevron" class:open={depthPanelOpen}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M4 2l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <h3 class="chart-heading">Sequencing Depth per Patient <span class="diag-tag">diagnostic</span></h3>
+            {#if depthWorstRatio >= 2}
+              <span class="depth-flag">medians differ up to {depthWorstRatio.toFixed(1)}x</span>
+            {:else if depthWorstRatio > 0}
+              <span class="depth-ok">medians within {depthWorstRatio.toFixed(1)}x</span>
+            {/if}
+          </button>
+          <!-- section-hidden rather than an {#if}: the figure exporter reveals
+               those temporarily, so the panel stays exportable while collapsed. -->
+          <div class:section-hidden={!depthPanelOpen}>
           <p class="chart-desc">
             Clone-assigned sequences per patient, the depth every metric below is computed on.
             Light chains are excluded because they never reach clonal assignment.
@@ -1313,6 +1365,7 @@
             cohortsData={useNCohortLayout ? nonEmptyCohortsData : null}
             {publicationMode}
           />
+          </div>
         </section>
         {#if hasCohorts && !useNCohortLayout}
           <div class="norm-bar" class:norm-on={normalizeDepth}>
@@ -1912,6 +1965,33 @@
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     color: var(--text-primary);
+  }
+  .depth-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+  }
+  .depth-header .chart-heading { margin: 0; }
+  .depth-flag {
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: #FEF3C7;
+    color: #92400E;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .depth-ok {
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: var(--gray-100, #f3f4f6);
+    color: var(--text-tertiary, #6b7280);
+    font-size: 10px;
   }
   .norm-bar {
     display: flex;

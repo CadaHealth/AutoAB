@@ -73,22 +73,36 @@
   });
   onDestroy(() => { ro?.disconnect(); });
 
-  $: if (svgEl && width > 0 && cohorts.length > 0) draw();
+  // Dependencies spelled out. Naming only svgEl, width and cohorts meant the
+  // panel never redrew when publicationMode flipped, so the exported figure was
+  // silently the on-screen rendering: dashboard font sizes, dashboard width,
+  // and none of the publication layout. Third time this shape of bug turned up
+  // in these charts, so it is worth stating plainly: Svelte tracks what the
+  // statement reads, not what draw() reaches for.
+  $: drawInputs = [svgEl, width, cohorts, timepoints, publicationMode];
+  $: if (svgEl && width > 0 && cohorts.length > 0 && drawInputs) draw();
 
   function draw() {
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
     if (timepoints.length === 0) return;
 
+    // On screen the panel spans the whole dashboard, which is what makes the
+    // depth spread easy to read. Exported at that width it came out around
+    // 5.5:1 and mostly empty, with the timepoint labels stranded in the gaps.
+    // The cap matches the width the boxplot cards export at, so the diagnostic
+    // sits next to them at the same scale.
+    const w = publicationMode ? Math.min(width, 820) : width;
+
     const margin = publicationMode
       ? { top: 16, right: 24, bottom: 56, left: 66 }
       : { top: 16, right: 20, bottom: 52, left: 58 };
     const rowHeight = publicationMode ? 190 : 175;
     const legendHeight = 32;
-    const innerW = Math.max(120, width - margin.left - margin.right);
+    const innerW = Math.max(120, w - margin.left - margin.right);
     const totalHeight = rowHeight + margin.top + margin.bottom + legendHeight;
 
-    svg.attr('width', width).attr('height', totalHeight);
+    svg.attr('width', w).attr('height', totalHeight);
     if (publicationMode) svg.style('font-family', 'Arial, Helvetica, sans-serif');
 
     const fontSize = publicationMode ? '11px' : '10px';

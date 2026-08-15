@@ -105,7 +105,15 @@
     return results;
   })();
 
-  $: if (container && needsTrajectory && width > 0) drawChart(width);
+  // Dependencies spelled out. Svelte tracks what a reactive statement reads,
+  // not what drawChart() reaches for inside itself, and the previous version
+  // named only container, needsTrajectory and width. None of those change when
+  // the caller swaps in depth-normalised metrics, so the chart kept drawing the
+  // unnormalised trajectory while the rest of the view was normalised: stale
+  // curves presented as current ones.
+  $: drawInputs = [container, needsTrajectory, width, diseaseData, controlData,
+                   allTests, normalizedDepth, publicationMode];
+  $: if (container && needsTrajectory && width > 0 && drawInputs) drawChart(width);
 
   function drawChart(w: number) {
     if (!container) return;
@@ -306,6 +314,10 @@
       } else {
         lg.append('text').attr('x', 0).attr('y', 9).text(item.label)
           .style('font-size', '9px').style('fill', '#999').style('font-style', 'italic');
+        // This branch used to leave lx untouched, which was invisible while
+        // there was only ever one caption item. A second one drew straight on
+        // top of the first.
+        lx += item.label.length * 4.6 + 24;
       }
     });
   }

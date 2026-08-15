@@ -12,8 +12,8 @@ Download from the [releases page](https://github.com/CadaHealth/AutoAB/releases/
 
 | Mac | File |
 |---|---|
-| Apple Silicon | `Clono-1.0.0-arm64.dmg` |
-| Intel | `Clono-1.0.0.dmg` |
+| Apple Silicon | `Clono-1.1.0-arm64.dmg` |
+| Intel | `Clono-1.1.0.dmg` |
 
 Open the disk image, drag the app to Applications, launch it. The builds are
 signed and notarised, so macOS opens them without a warning. Requires macOS 11

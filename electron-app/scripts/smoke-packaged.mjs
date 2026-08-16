@@ -11,6 +11,7 @@
 import { _electron as electron } from 'playwright';
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const appPath = process.argv[2];
@@ -175,4 +176,31 @@ for (const label of ['Export Aggregated', 'Export Per-Sample']) {
 
 await win.screenshot({ path: path.join(SHOTS, 'smoke_04_final.png') });
 await app.close();
+
+// A run must leave the bundle exactly as it shipped.
+//
+// The interpreter lives inside the .app, so anything Python writes lands in a
+// signed, sealed bundle. Nine __pycache__ directories from a single launch
+// were enough to make codesign report "a sealed resource is missing or
+// invalid" and to kill the app mid-pipeline. None of that is visible on an
+// unsigned build, which is exactly why the check belongs here rather than in
+// the release step where it would be remembered only when someone thinks of it.
+step('Bundle integrity after the run');
+const caches = execSync(`find ${JSON.stringify(appPath)} -name __pycache__ -type d`, { encoding: 'utf8' })
+  .trim().split('\n').filter(Boolean);
+if (caches.length === 0) ok('no bytecode written into the bundle');
+else {
+  fail(`${caches.length} __pycache__ directories written into the bundle`);
+  caches.slice(0, 5).forEach((c) => console.log(`      ${c.replace(appPath + '/', '')}`));
+}
+
+try {
+  execSync(`codesign --verify --deep --strict ${JSON.stringify(appPath)}`, { stdio: 'pipe' });
+  ok('code signature still valid after the run');
+} catch (e) {
+  const msg = String(e.stderr || e).trim().split('\n').pop();
+  if (/not signed|code object is not signed/i.test(msg)) console.log('    (unsigned build, signature check skipped)');
+  else fail(`code signature broken by the run: ${msg}`);
+}
+
 console.log(process.exitCode ? '\nSMOKE TEST: problems above' : '\nSMOKE TEST: clean');

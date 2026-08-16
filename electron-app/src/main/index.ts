@@ -12,6 +12,25 @@ import { spawnSync } from 'child_process';
 import { setupIpcHandlers } from './ipc-handlers';
 import { BackendRunner } from './backend-runner';
 
+/**
+ * No Python process may write bytecode, and that has to hold for every one of
+ * them, not just the pipeline.
+ *
+ * The interpreter and the backend both live inside the .app, and a signed
+ * bundle is sealed: one __pycache__ directory written into Resources makes
+ * `codesign --verify` report "a sealed resource is missing or invalid", and
+ * macOS can then refuse to run the app. This was previously set on the
+ * pipeline process alone, which left the interpreter probe below (it runs
+ * `import changeo, presto` at startup) and the dependency checks free to
+ * write. One launch of the signed build produced nine __pycache__
+ * directories, invalidated the signature, and killed the app mid-run.
+ *
+ * Setting it on the main process rather than at each spawn site means every
+ * child inherits it, including ones added later. That is the point: the
+ * earlier per-spawn fix was correct and still missed two call sites.
+ */
+process.env.PYTHONDONTWRITEBYTECODE = '1';
+
 // Keep a global reference of the window object to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
 let backendRunner: BackendRunner | null = null;
